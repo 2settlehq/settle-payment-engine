@@ -13,8 +13,12 @@ import config from '../../config';
  * Derive action name from request method and path
  */
 function deriveAction(method: string, path: string): string {
-  // Remove leading slash and split path
-  const parts = path.replace(/^\//, '').split('/');
+  // Remove leading slash and API version prefix (e.g., /v1/)
+  let cleanPath = path.replace(/^\//, '');
+  if (cleanPath.startsWith('v1/')) {
+    cleanPath = cleanPath.substring(3);
+  }
+  const parts = cleanPath.split('/');
 
   // Handle common patterns
   if (parts.length === 0 || parts[0] === '') {
@@ -50,16 +54,31 @@ function deriveAction(method: string, path: string): string {
  * Extract resource type and ID from path
  */
 function extractResource(path: string): { type?: string; id?: string } {
-  const parts = path.replace(/^\//, '').split('/');
+  // Remove leading slash only, keep the full path including version prefix
+  const cleanPath = path.replace(/^\//, '');
 
-  if (parts.length === 0) {
+  if (!cleanPath) {
     return {};
   }
 
-  const type = parts[0];
-  const id = parts.length > 1 ? parts[1] : undefined;
+  const parts = cleanPath.split('/');
 
-  return { type, id };
+  // For paths like "v1/payments/2S-ABC123", extract:
+  // - type: "v1/payments" (version + resource)
+  // - id: "2S-ABC123" (the identifier)
+  if (parts.length >= 3 && parts[0] === 'v1') {
+    const type = `${parts[0]}/${parts[1]}`; // e.g., "v1/payments"
+    const id = parts[2]; // e.g., "2S-ABC123"
+    return { type, id };
+  }
+
+  // For paths like "v1/health" or "v1/payments"
+  if (parts.length >= 2 && parts[0] === 'v1') {
+    return { type: cleanPath, id: undefined };
+  }
+
+  // Fallback for non-versioned paths
+  return { type: cleanPath, id: undefined };
 }
 
 /**
@@ -87,7 +106,7 @@ export function auditLog(
   }
 
   // Skip health check endpoint (too noisy)
-  if (req.path === '/health') {
+  if (req.path === '/v1/health') {
     return next();
   }
 
