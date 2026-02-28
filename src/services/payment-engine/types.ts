@@ -71,7 +71,7 @@ export interface CreatePaymentInput {
   fiatCurrency: FiatCurrency;
   crypto: CryptoCurrency;
   network: Network;
-  payer: PayerInput;
+  payer?: PayerInput; // Optional for request type
   receiver?: ReceiverInput;
   merchantId?: string;
   merchantReference?: string;
@@ -105,15 +105,12 @@ export interface PaymentSession {
   network: Network;
   rate: number;
   assetPrice: number;
-  rateLockedAt: Date;
   chargeAmount: number;
-  chargeCrypto: number;
   depositAddress: string;
   walletId?: number; // Deprecated: use derivationIndex
   derivationIndex?: number; // HD wallet derivation index
   hdChain?: HDChain; // HD wallet chain
   payerId?: number;
-  payerChatId: string;
   receiverId?: number;
   merchantId?: string;
   txHash?: string;
@@ -124,8 +121,6 @@ export interface PaymentSession {
   confirmedAt?: Date;
   settledAt?: Date;
   metadata?: Record<string, unknown>;
-  cashbackAmount?: number;
-  cashbackCredited?: boolean;
 }
 
 // =============================================================================

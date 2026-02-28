@@ -106,7 +106,7 @@ export class PaymentEngine {
    *   receiver: {
    *     bankCode: '058',
    *     accountNumber: '1234567890',
-   *     accountName: 'John Doe'
+   *     accountName: 'Nyikwagh Moses'
    *   }
    * });
    *

@@ -64,8 +64,11 @@ function validateCreateInput(input: CreatePaymentInput): void {
     throw new InvalidInputError('Network is required', 'network');
   }
 
-  if (!input.payer?.chatId) {
-    throw new InvalidInputError('Payer chat ID is required', 'payer.chatId');
+  // Type-specific payer/receiver validation
+  if (input.type === 'transfer' || input.type === 'gift') {
+    if (!input.payer?.chatId) {
+      throw new InvalidInputError('Payer chat ID is required', 'payer.chatId');
+    }
   }
 
   if (input.type === 'transfer') {
@@ -178,14 +181,11 @@ export class SessionManager {
       network: input.network,
       rate: rateLock.rate,
       assetPrice: rateLock.assetPrice,
-      rateLockedAt: rateLock.lockedAt,
       chargeAmount: charges.fiatCharge,
-      chargeCrypto: charges.cryptoCharge,
       depositAddress,
       walletId,
       derivationIndex,
       hdChain: hdChain as any,
-      payerChatId: input.payer.chatId,
       merchantId: input.merchantId,
       expiresAt,
       metadata: input.metadata,

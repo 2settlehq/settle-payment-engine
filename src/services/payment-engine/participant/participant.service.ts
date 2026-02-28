@@ -61,7 +61,7 @@ export class ParticipantService {
 
   /**
    * Get or create a receiver record.
-   * Finds existing receiver by bank account and bank code/name, creates new if not found.
+   * Finds existing receiver by bank account and bank name, creates new if not found.
    *
    * @param receiver - Receiver input from PaymentEngine
    * @returns Receiver database ID
@@ -69,33 +69,36 @@ export class ParticipantService {
   async getOrCreateReceiver(receiver: ReceiverInput): Promise<number> {
     const pool = (await import('../../../lib/mysql')).default;
 
-    // Try to find existing receiver by bank account and bank code
-    // Support both bank_code (new) and bank_name (legacy) lookups
-    const [rows] = await pool.query(
-      `SELECT id FROM receivers
-       WHERE bank_account = ? AND (bank_code = ? OR bank_name = ?)
-       LIMIT 1`,
-      [receiver.accountNumber, receiver.bankCode, receiver.bankCode]
-    ) as [any[], any];
+    try {
+      // Try to find existing receiver by bank_account and bank_name (legacy column names)
+      const [rows] = await pool.query(
+        `SELECT id FROM receivers
+         WHERE bank_account = ? AND bank_name = ?
+         LIMIT 1`,
+        [receiver.accountNumber, receiver.bankCode]
+      ) as [any[], any];
 
-    if (rows && rows.length > 0) {
-      return rows[0].id;
+      if (rows && rows.length > 0) {
+        return rows[0].id;
+      }
+
+      // Create new receiver (using legacy column names)
+      const [result] = await pool.query(
+        `INSERT INTO receivers (bank_account, bank_name, account_name, phone)
+         VALUES (?, ?, ?, ?)`,
+        [
+          receiver.accountNumber,
+          receiver.bankCode,
+          receiver.accountName,
+          receiver.phone || null,
+        ]
+      ) as [any, any];
+
+      return result.insertId;
+    } catch (error: any) {
+      console.error('[ParticipantService] Receiver error:', error.message, error.code);
+      throw error;
     }
-
-    // Create new receiver with both bank_code and bank_name
-    const [result] = await pool.query(
-      `INSERT INTO receivers (bank_account, bank_code, bank_name, account_name, phone)
-       VALUES (?, ?, ?, ?, ?)`,
-      [
-        receiver.accountNumber,
-        receiver.bankCode,
-        receiver.bankCode, // Use bankCode as bank_name for compatibility
-        receiver.accountName,
-        receiver.phone || null,
-      ]
-    ) as [any, any];
-
-    return result.insertId;
   }
 
   /**
@@ -133,7 +136,7 @@ export class ParticipantService {
     const pool = (await import('../../../lib/mysql')).default;
 
     const [rows] = await pool.query(
-      `SELECT id, bank_code, bank_account, account_name, phone
+      `SELECT id, bank_name, bank_account, account_name, phone
        FROM receivers WHERE id = ?`,
       [receiverId]
     ) as [any[], any];
@@ -144,7 +147,7 @@ export class ParticipantService {
 
     return {
       id: rows[0].id,
-      bankCode: rows[0].bank_code || rows[0].bank_name,
+      bankCode: rows[0].bank_name,
       bankAccount: rows[0].bank_account,
       accountName: rows[0].account_name,
       phone: rows[0].phone || undefined,
@@ -198,7 +201,7 @@ export class ParticipantService {
     const values: any[] = [];
 
     if (updates.bankCode !== undefined) {
-      fields.push('bank_code = ?');
+      fields.push('bank_name = ?');
       values.push(updates.bankCode);
     }
     if (updates.accountNumber !== undefined) {

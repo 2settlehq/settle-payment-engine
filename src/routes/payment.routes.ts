@@ -53,7 +53,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
         chatId: input.payer.chatId,
         phone: input.payer.phone,
         walletAddress: input.payer.walletAddress,
-      } : { chatId: '' }, // Will be validated by type-specific rules
+      } : undefined, // Type-specific validation happens in session manager
       receiver: input.receiver,
       merchantId: input.merchantId,
       merchantReference: input.merchantReference,

@@ -7,6 +7,7 @@
 
 import { HDKey } from '@scure/bip32';
 import { keccak_256 } from '@noble/hashes/sha3.js';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { ChainDerivation, KeyMaterial, DERIVATION_PATHS } from '../types';
 
 const DERIVATION_PATH_BASE = DERIVATION_PATHS.tron;
@@ -91,9 +92,6 @@ export class TronDerivation implements ChainDerivation {
    * Convert private key to Tron address.
    */
   private privateKeyToAddress(privateKeyHex: string): string {
-    // Use secp256k1 to get public key
-    const { secp256k1 } = require('@noble/curves/secp256k1');
-
     const privateKey = Buffer.from(privateKeyHex, 'hex');
     const publicKey = secp256k1.getPublicKey(privateKey, false); // Uncompressed
 

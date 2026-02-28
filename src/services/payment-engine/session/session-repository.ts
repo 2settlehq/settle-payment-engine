@@ -24,14 +24,11 @@ export interface CreateSessionData {
   network: Network;
   rate: number;
   assetPrice: number;
-  rateLockedAt: Date;
   chargeAmount: number;
-  chargeCrypto: number;
   depositAddress: string;
   walletId?: number; // Deprecated: use derivationIndex
   derivationIndex?: number; // HD wallet derivation index
   hdChain?: HDChain; // HD wallet chain
-  payerChatId: string;
   payerId?: number;
   receiverId?: number;
   merchantId?: string;
@@ -61,19 +58,16 @@ function rowToSession(row: any): PaymentSession {
     fiatAmount: Number(row.fiat_amount),
     fiatCurrency: row.fiat_currency as FiatCurrency,
     cryptoAmount: Number(row.crypto_amount),
-    crypto: row.crypto_currency as CryptoCurrency,
+    crypto: row.crypto as CryptoCurrency,
     network: row.network as Network,
     rate: Number(row.rate),
     assetPrice: Number(row.asset_price),
-    rateLockedAt: new Date(row.rate_locked_at),
     chargeAmount: Number(row.charge_amount),
-    chargeCrypto: Number(row.charge_crypto),
     depositAddress: row.deposit_address,
     walletId: row.wallet_id ? Number(row.wallet_id) : undefined,
     derivationIndex: row.derivation_index ? Number(row.derivation_index) : undefined,
     hdChain: row.hd_chain as HDChain | undefined,
     payerId: row.payer_id ? Number(row.payer_id) : undefined,
-    payerChatId: row.payer_chat_id,
     receiverId: row.receiver_id ? Number(row.receiver_id) : undefined,
     merchantId: row.merchant_id || undefined,
     txHash: row.tx_hash || undefined,
@@ -84,8 +78,6 @@ function rowToSession(row: any): PaymentSession {
     confirmedAt: row.confirmed_at ? new Date(row.confirmed_at) : undefined,
     settledAt: row.settled_at ? new Date(row.settled_at) : undefined,
     metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-    cashbackAmount: row.cashback_amount ? Number(row.cashback_amount) : undefined,
-    cashbackCredited: row.cashback_credited ? Boolean(row.cashback_credited) : undefined,
   };
 }
 
@@ -98,14 +90,13 @@ export class SessionRepository {
       await pool.query(
         `INSERT INTO payment_sessions (
           id, reference, type, status,
-          fiat_amount, fiat_currency, crypto_amount, crypto_currency, network,
-          rate, asset_price, rate_locked_at,
-          charge_amount, charge_crypto,
+          fiat_amount, fiat_currency, crypto_amount, crypto, network,
+          rate, asset_price, charge_amount,
           deposit_address, wallet_id, derivation_index, hd_chain,
-          payer_chat_id, payer_id, receiver_id, merchant_id,
+          payer_id, receiver_id, merchant_id,
           expires_at, created_at, updated_at,
           metadata
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.id,
           data.reference,
@@ -118,14 +109,11 @@ export class SessionRepository {
           data.network,
           data.rate,
           data.assetPrice,
-          data.rateLockedAt,
           data.chargeAmount,
-          data.chargeCrypto,
           data.depositAddress,
           data.walletId || null,
           data.derivationIndex || null,
           data.hdChain || null,
-          data.payerChatId,
           data.payerId || null,
           data.receiverId || null,
           data.merchantId || null,
