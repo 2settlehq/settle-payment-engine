@@ -1,6 +1,6 @@
-import { hmacSha256, sha256, secureCompare } from '../utils/crypto';
-import { HmacPayload, AuthenticationError } from '../types';
-import config from '../../config';
+import { hmacSha256, sha256, secureCompare } from "../utils/crypto";
+import { HmacPayload, AuthenticationError } from "../types";
+import config from "../../config";
 
 /**
  * HMAC Service
@@ -23,9 +23,10 @@ export function generateSignature(
   timestamp: number,
   method: string,
   path: string,
-  body: unknown
+  body: unknown,
 ): string {
-  const bodyString = typeof body === 'string' ? body : JSON.stringify(body || {});
+  const bodyString =
+    typeof body === "string" ? body : JSON.stringify(body || {});
   const bodyHash = sha256(bodyString);
 
   const payload = buildSignaturePayload({
@@ -34,6 +35,10 @@ export function generateSignature(
     path,
     bodyHash,
   });
+
+  console.log("Body String for Hashing:", bodyString);
+  console.log("Body Hash:", bodyHash);
+  console.log("Payload for Signature:", payload);
 
   return hmacSha256(secretKey, payload);
 }
@@ -47,9 +52,18 @@ export function verifySignature(
   timestamp: number,
   method: string,
   path: string,
-  body: unknown
+  body: unknown,
 ): boolean {
-  const expectedSignature = generateSignature(secretKey, timestamp, method, path, body);
+  const expectedSignature = generateSignature(
+    secretKey,
+    timestamp,
+    method,
+    path,
+    body,
+  );
+  console.log("Secret Key:", secretKey);
+  console.log("Expected Signature:", expectedSignature);
+  console.log("Provided Signature:", providedSignature);
   return secureCompare(providedSignature, expectedSignature);
 }
 
@@ -64,7 +78,7 @@ export function validateTimestamp(timestamp: number): void {
   if (diff > toleranceMs) {
     throw new AuthenticationError(
       `Request timestamp is outside acceptable window (${Math.round(toleranceMs / 1000)}s)`,
-      'TIMESTAMP_EXPIRED'
+      "TIMESTAMP_EXPIRED",
     );
   }
 }
@@ -72,30 +86,44 @@ export function validateTimestamp(timestamp: number): void {
 /**
  * Parse and validate required authentication headers
  */
-export function parseAuthHeaders(headers: Record<string, string | string[] | undefined>): {
+export function parseAuthHeaders(
+  headers: Record<string, string | string[] | undefined>,
+): {
   apiKey: string;
   timestamp: number;
   signature: string;
 } {
-  const apiKey = headers['x-api-key'];
-  const timestampStr = headers['x-timestamp'];
-  const signature = headers['x-signature'];
+  const apiKey = headers["x-api-key"];
+  const timestampStr = headers["x-timestamp"];
+  const signature = headers["x-signature"];
 
-  if (!apiKey || typeof apiKey !== 'string') {
-    throw new AuthenticationError('Missing X-API-Key header', 'MISSING_API_KEY');
+  if (!apiKey || typeof apiKey !== "string") {
+    throw new AuthenticationError(
+      "Missing X-API-Key header",
+      "MISSING_API_KEY",
+    );
   }
 
-  if (!timestampStr || typeof timestampStr !== 'string') {
-    throw new AuthenticationError('Missing X-Timestamp header', 'MISSING_TIMESTAMP');
+  if (!timestampStr || typeof timestampStr !== "string") {
+    throw new AuthenticationError(
+      "Missing X-Timestamp header",
+      "MISSING_TIMESTAMP",
+    );
   }
 
-  if (!signature || typeof signature !== 'string') {
-    throw new AuthenticationError('Missing X-Signature header', 'MISSING_SIGNATURE');
+  if (!signature || typeof signature !== "string") {
+    throw new AuthenticationError(
+      "Missing X-Signature header",
+      "MISSING_SIGNATURE",
+    );
   }
 
   const timestamp = parseInt(timestampStr, 10);
   if (isNaN(timestamp)) {
-    throw new AuthenticationError('Invalid X-Timestamp header', 'INVALID_TIMESTAMP');
+    throw new AuthenticationError(
+      "Invalid X-Timestamp header",
+      "INVALID_TIMESTAMP",
+    );
   }
 
   return { apiKey, timestamp, signature };

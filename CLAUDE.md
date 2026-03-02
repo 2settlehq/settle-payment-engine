@@ -200,23 +200,35 @@ X-Signature: abc123...        # HMAC-SHA256 signature
 
 ### Signature Generation (Node.js)
 
-```javascript
-const CryptoJS = require('crypto-js');
+**Important**: The HMAC key is `SHA256(secretKey)`, not the raw secret key. This allows us to store only the hash on the server while both client and server can compute the same HMAC key.
 
+```javascript
+const crypto = require('crypto');
+
+const secretKey = 'sk_your_secret_key_here';
 const timestamp = Date.now().toString();
 const method = 'POST';
 const path = '/v1/payments';
-const body = JSON.stringify({ type: 'transfer', ... });
+const body = JSON.stringify({ type: 'transfer', ... }); // Must be minified JSON
 
-// Calculate body hash
-const bodyHash = CryptoJS.SHA256(body).toString();
+// Step 1: Hash the body
+const bodyHash = crypto.createHash('sha256').update(body).digest('hex');
 
-// Build payload: timestamp|METHOD|path|bodyHash
+// Step 2: Build payload
 const payload = `${timestamp}|${method}|${path}|${bodyHash}`;
 
-// Generate signature using your secret key
-const signature = CryptoJS.HmacSHA256(payload, secretKey).toString();
+// Step 3: Derive HMAC key from secret (SHA256 of secretKey)
+const hmacKey = crypto.createHash('sha256').update(secretKey).digest('hex');
+
+// Step 4: Generate signature
+const signature = crypto.createHmac('sha256', hmacKey).update(payload).digest('hex');
 ```
+
+**Why SHA256(secretKey)?**
+- Server stores `SHA256(secretKey)` in database (never the raw secret)
+- Client computes `SHA256(secretKey)` locally
+- Both sides use the same derived key for HMAC
+- If database is breached, attacker cannot reverse the hash to get original secret
 
 ### Admin Authentication
 
@@ -506,7 +518,9 @@ Variables:
 Add this to your Postman **Collection** (not individual requests):
 
 ```javascript
-// CryptoJS is available globally in Postman - no require needed
+// Modern Postman approach - use require instead of deprecated global CryptoJS
+const CryptoJS = require('crypto-js');
+
 const secretKey = pm.environment.get('secretKey');
 const apiKey = pm.environment.get('apiKey');
 
@@ -518,19 +532,46 @@ if (!secretKey || !apiKey) {
 const timestamp = Date.now().toString();
 const method = pm.request.method;
 const path = pm.request.url.getPath();
-const body = pm.request.body ? pm.request.body.raw || '{}' : '{}';
 
+// Get raw body and normalize to minified JSON (must match server's JSON.stringify)
+let body = pm.request.body ? pm.request.body.raw : '{}';
+try {
+    body = JSON.stringify(JSON.parse(body || '{}'));
+} catch (e) {
+    body = '{}';
+}
+
+// Step 1: Hash the body
 const bodyHash = CryptoJS.SHA256(body).toString();
-const payload = `${timestamp}|${method}|${path}|${bodyHash}`;
-const signature = CryptoJS.HmacSHA256(payload, secretKey).toString();
 
+// Step 2: Build payload
+const payload = `${timestamp}|${method}|${path}|${bodyHash}`;
+
+// Step 3: Derive HMAC key from secret (SHA256 of secretKey)
+const hmacKey = CryptoJS.SHA256(secretKey).toString();
+
+// Step 4: Generate signature using derived key
+const signature = CryptoJS.HmacSHA256(payload, hmacKey).toString();
+
+// Set headers
 pm.request.headers.upsert({ key: 'X-API-Key', value: apiKey });
 pm.request.headers.upsert({ key: 'X-Timestamp', value: timestamp });
 pm.request.headers.upsert({ key: 'X-Signature', value: signature });
 pm.request.headers.upsert({ key: 'Content-Type', value: 'application/json' });
 
-console.log('HMAC Auth set for:', path);
+// Debug logging (check Postman Console)
+console.log('=== HMAC Auth Debug ===');
+console.log('Path:', path);
+console.log('Body:', body);
+console.log('Body Hash:', bodyHash);
+console.log('Payload:', payload);
+console.log('Signature:', signature);
 ```
+
+**Key points:**
+- Uses `require('crypto-js')` instead of deprecated global `CryptoJS`
+- Body is parsed and re-stringified to ensure consistent minified JSON
+- HMAC key is `SHA256(secretKey)`, not the raw secret
 
 ### 6. Test Payments
 

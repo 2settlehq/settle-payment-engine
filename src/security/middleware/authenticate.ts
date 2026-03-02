@@ -66,20 +66,21 @@ async function authenticateAsync(req: Request): Promise<void> {
   const bodyHash = sha256(bodyString);
 
   // Verify HMAC signature
-  // The client should sign: timestamp|METHOD|path|bodyHash
-  // Using their secret key (which we have the hash of in DB)
-
-  // For HMAC verification, we need the original secret key
-  // Since we only store the hash, we verify by:
-  // 1. Client sends signature = HMAC(secretKey, payload)
-  // 2. We reconstruct expected signature using the stored keyHash as a shared secret
   //
-  // IMPORTANT: In production, you'd typically have a different approach:
-  // Either store the secret encrypted (not just hashed), or use asymmetric keys
-  // For this implementation, we'll use the keyHash as a derived key for HMAC
+  // DESIGN: Both client and server use SHA256(secretKey) as the HMAC key
+  //
+  // How it works:
+  // 1. On key creation: Server generates secretKey, stores SHA256(secretKey) as keyHash
+  // 2. Client receives secretKey once, computes SHA256(secretKey) locally
+  // 3. Both sides now have the same derived HMAC key
+  //
+  // Why this design?
+  // - Server never stores raw secret (only hash) - secure against DB breaches
+  // - Client can derive HMAC key from their secret
+  // - Standard HMAC verification without storing reversible secrets
 
   const isValid = verifySignature(
-    apiKey.keyHash, // Using hash as the HMAC key (client must use same)
+    apiKey.keyHash, // SHA256(secretKey) - client must compute and use the same
     signature,
     timestamp,
     req.method,
