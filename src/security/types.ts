@@ -22,6 +22,10 @@ export interface ApiKey {
   expiresAt: Date | null;
   createdAt: Date;
   lastUsedAt: Date | null;
+  // Wallet-as-a-Service fields
+  webhookUrl: string | null;
+  webhookSecret: string | null;
+  sweepAddress: string | null;
 }
 
 export interface CreateApiKeyInput {
@@ -31,10 +35,13 @@ export interface CreateApiKeyInput {
   rateLimitTier?: RateLimitTier;
   ipWhitelist?: string[];
   expiresAt?: Date;
+  // Wallet-as-a-Service fields
+  webhookUrl?: string;
+  sweepAddress?: string;
 }
 
 export interface ApiKeyWithSecret {
-  apiKey: Omit<ApiKey, 'keyHash'>;
+  apiKey: Omit<ApiKey, 'keyHash' | 'webhookSecret'>;
   secretKey: string; // Only returned once on creation
 }
 

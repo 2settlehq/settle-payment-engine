@@ -21,6 +21,8 @@ export interface SweepRequest {
   amount: string;
   cryptoCurrency: CryptoCurrency;
   tokenContract?: string;
+  /** Optional custom destination (for HDWaaS). If not provided, uses hot wallet. */
+  toAddress?: string;
 }
 
 /** Result of a sweep operation */

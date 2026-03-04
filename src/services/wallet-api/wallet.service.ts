@@ -12,6 +12,7 @@ import {
 } from './types';
 import * as walletRepository from './wallet.repository';
 import { getHDWalletService } from '../payment-engine/hd-wallet';
+import { getDepositWatcher } from '../payment-engine/watcher';
 import { incrementUsage } from './usage.service';
 
 export class WalletServiceError extends Error {
@@ -95,6 +96,21 @@ export async function createWallet(
 
   // Track usage
   await incrementUsage(apiKeyId, 'wallets_created');
+
+  // Register with deposit watcher for monitoring
+  const watcher = getDepositWatcher();
+  if (watcher?.isActive()) {
+    watcher.watchWallet({
+      id: wallet.id,
+      apiKeyId,
+      address: wallet.address,
+      network: wallet.network,
+      crypto: wallet.crypto,
+      derivationIndex: wallet.derivationIndex,
+      hdChain: wallet.hdChain,
+      expiresAt: wallet.expiresAt,
+    });
+  }
 
   return {
     id: wallet.id,

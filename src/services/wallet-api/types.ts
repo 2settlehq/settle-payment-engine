@@ -60,15 +60,21 @@ export interface CreateWalletResult {
 
 export interface WebhookPayload {
   event: WebhookEventType;
-  wallet_id: string;
-  address: string;
-  network: string;
-  crypto: string;
   timestamp: string;
-  tx_hash?: string;
-  amount?: string;
-  confirmations?: number;
-  sweep_tx?: string;
+  wallet: {
+    id: string;
+    address: string;
+    network: string;
+    crypto: string;
+  };
+  deposit?: {
+    txHash: string;
+    amount: string;
+    confirmations: number;
+  };
+  sweep?: {
+    txHash: string;
+  };
   metadata?: Record<string, unknown>;
 }
 

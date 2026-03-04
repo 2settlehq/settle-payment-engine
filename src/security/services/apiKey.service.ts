@@ -1,5 +1,5 @@
 import pool from '../../lib/mysql';
-import { generateApiKeyPair, sha256 } from '../utils/crypto';
+import { generateApiKeyPair, sha256, generateWebhookSecret } from '../utils/crypto';
 import {
   ApiKey,
   CreateApiKeyInput,
@@ -26,6 +26,10 @@ interface ApiKeyRow extends RowDataPacket {
   expires_at: Date | null;
   created_at: Date;
   last_used_at: Date | null;
+  // Wallet-as-a-Service fields
+  webhook_url: string | null;
+  webhook_secret: string | null;
+  sweep_address: string | null;
 }
 
 /**
@@ -61,6 +65,9 @@ function rowToApiKey(row: ApiKeyRow): ApiKey {
     expiresAt: row.expires_at,
     createdAt: row.created_at,
     lastUsedAt: row.last_used_at,
+    webhookUrl: row.webhook_url,
+    webhookSecret: row.webhook_secret,
+    sweepAddress: row.sweep_address,
   };
 }
 
@@ -68,13 +75,16 @@ function rowToApiKey(row: ApiKeyRow): ApiKey {
  * Create a new API key for a merchant
  * Returns the secret key only once - it cannot be retrieved later
  */
-export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWithSecret> {
+export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWithSecret & { webhookSecret?: string }> {
   const { keyId, secretKey } = generateApiKeyPair();
   const keyHash = sha256(secretKey);
 
+  // Generate webhook secret if webhook URL is provided
+  const webhookSecret = input.webhookUrl ? generateWebhookSecret() : null;
+
   const [result] = await pool.query<ResultSetHeader>(
-    `INSERT INTO api_keys (key_id, key_hash, merchant_id, name, permissions, rate_limit_tier, ip_whitelist, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO api_keys (key_id, key_hash, merchant_id, name, permissions, rate_limit_tier, ip_whitelist, expires_at, webhook_url, webhook_secret, sweep_address)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       keyId,
       keyHash,
@@ -84,6 +94,9 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWith
       input.rateLimitTier || 'standard',
       input.ipWhitelist ? JSON.stringify(input.ipWhitelist) : null,
       input.expiresAt || null,
+      input.webhookUrl || null,
+      webhookSecret,
+      input.sweepAddress || null,
     ]
   );
 
@@ -92,12 +105,19 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<ApiKeyWith
     throw new Error('Failed to create API key');
   }
 
-  const { keyHash: _, ...apiKeyWithoutHash } = apiKey;
+  const { keyHash: _, webhookSecret: __, ...apiKeyWithoutSecrets } = apiKey;
 
-  return {
-    apiKey: apiKeyWithoutHash,
+  const response: ApiKeyWithSecret & { webhookSecret?: string } = {
+    apiKey: apiKeyWithoutSecrets,
     secretKey,
   };
+
+  // Include webhook secret only once at creation time
+  if (webhookSecret) {
+    response.webhookSecret = webhookSecret;
+  }
+
+  return response;
 }
 
 /**
@@ -229,6 +249,8 @@ export async function updateApiKey(
     permissions?: string[];
     rateLimitTier?: 'standard' | 'premium' | 'unlimited';
     ipWhitelist?: string[] | null;
+    webhookUrl?: string | null;
+    sweepAddress?: string | null;
   }
 ): Promise<ApiKey | null> {
   const setClauses: string[] = [];
@@ -252,6 +274,21 @@ export async function updateApiKey(
   if (updates.ipWhitelist !== undefined) {
     setClauses.push('ip_whitelist = ?');
     values.push(updates.ipWhitelist ? JSON.stringify(updates.ipWhitelist) : null);
+  }
+
+  if (updates.webhookUrl !== undefined) {
+    setClauses.push('webhook_url = ?');
+    values.push(updates.webhookUrl);
+    // Generate new webhook secret if URL is being set
+    if (updates.webhookUrl) {
+      setClauses.push('webhook_secret = ?');
+      values.push(generateWebhookSecret());
+    }
+  }
+
+  if (updates.sweepAddress !== undefined) {
+    setClauses.push('sweep_address = ?');
+    values.push(updates.sweepAddress);
   }
 
   if (setClauses.length === 0) {
@@ -291,4 +328,49 @@ export function hasPermission(apiKey: ApiKey, requiredPermission: string): boole
 
     return false;
   });
+}
+
+/**
+ * Get webhook configuration for an API key
+ * Returns null if webhook is not configured
+ */
+export async function getWebhookConfig(apiKeyId: number): Promise<{
+  webhookUrl: string;
+  webhookSecret: string;
+  sweepAddress: string | null;
+} | null> {
+  const [rows] = await pool.query<ApiKeyRow[]>(
+    'SELECT webhook_url, webhook_secret, sweep_address FROM api_keys WHERE id = ? AND is_active = TRUE',
+    [apiKeyId]
+  );
+
+  if (rows.length === 0 || !rows[0].webhook_url || !rows[0].webhook_secret) {
+    return null;
+  }
+
+  return {
+    webhookUrl: rows[0].webhook_url,
+    webhookSecret: rows[0].webhook_secret,
+    sweepAddress: rows[0].sweep_address,
+  };
+}
+
+/**
+ * Regenerate webhook secret for an API key
+ * Returns the new secret (only shown once)
+ */
+export async function regenerateWebhookSecret(keyId: string): Promise<string | null> {
+  const apiKey = await getApiKeyByKeyId(keyId);
+  if (!apiKey || !apiKey.webhookUrl) {
+    return null;
+  }
+
+  const newSecret = generateWebhookSecret();
+
+  await pool.query(
+    'UPDATE api_keys SET webhook_secret = ? WHERE key_id = ?',
+    [newSecret, keyId]
+  );
+
+  return newSecret;
 }

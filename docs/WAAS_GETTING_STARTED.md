@@ -12,6 +12,7 @@ Generate unique cryptocurrency deposit addresses on demand with automatic deposi
 - [API Reference](#api-reference)
 - [Code Examples](#code-examples)
 - [Webhooks](#webhooks)
+- [Auto-Sweep](#auto-sweep)
 - [Best Practices](#best-practices)
 - [Error Handling](#error-handling)
 - [FAQ](#faq)
@@ -125,7 +126,7 @@ Show the generated address to your customer for payment. The address is unique a
 
 ### Step 4: Receive Webhook Notifications
 
-Configure your webhook URL to receive deposit notifications (coming soon).
+Configure your webhook URL when creating your API key to receive deposit notifications automatically.
 
 ---
 
@@ -592,20 +593,40 @@ echo "Status: " . $status['wallet']['status'] . "\n";
 
 ## Webhooks
 
-> **Note:** Webhook functionality is coming soon. This section describes the planned behavior.
+Webhooks notify your application in real-time when deposits are detected, confirmed, or swept.
 
 ### Configuration
 
-Configure your webhook URL when creating your API key:
+Configure your webhook URL and sweep address when creating your API key:
+
+```bash
+curl -X POST https://api.spend.2settle.io/v1/admin/api-keys \
+  -H "Authorization: Bearer ADMIN_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchantId": "your-company",
+    "name": "Production Key",
+    "permissions": ["wallet:create", "wallet:read"],
+    "webhookUrl": "https://yourapp.com/webhooks/crypto",
+    "sweepAddress": "TYourTronAddressForReceivingFunds"
+  }'
+```
+
+**Response includes your webhook secret (shown only once):**
 
 ```json
 {
-  "merchantId": "your-company",
-  "name": "Production Key",
-  "permissions": ["wallet:create", "wallet:read"],
-  "webhookUrl": "https://yourapp.com/webhooks/crypto"
+  "success": true,
+  "apiKey": {
+    "publicKey": "pk_xxx...",
+    "keyId": "pk_xxx..."
+  },
+  "secretKey": "sk_xxx...",
+  "webhookSecret": "whsec_xxx..."
 }
 ```
+
+> **Important:** Save the `webhookSecret` immediately - it's only shown once at creation time. You'll need it to verify webhook signatures.
 
 ### Webhook Events
 
@@ -616,6 +637,8 @@ Configure your webhook URL when creating your API key:
 | `sweep.completed` | Funds swept | Funds moved to hot wallet |
 
 ### Webhook Payload
+
+All webhook events share the same structure:
 
 ```json
 {
@@ -632,6 +655,9 @@ Configure your webhook URL when creating your API key:
     "amount": "100.50",
     "confirmations": 19
   },
+  "sweep": {
+    "txHash": "def456..."
+  },
   "metadata": {
     "orderId": "ORD-12345",
     "customerId": "cust_abc"
@@ -639,11 +665,30 @@ Configure your webhook URL when creating your API key:
 }
 ```
 
+| Field | Present In | Description |
+|-------|------------|-------------|
+| `event` | All | Event type: `deposit.detected`, `deposit.confirmed`, `sweep.completed` |
+| `timestamp` | All | ISO 8601 timestamp |
+| `wallet` | All | Wallet details (id, address, network, crypto) |
+| `deposit` | All | Deposit info (txHash, amount, confirmations) |
+| `sweep` | `sweep.completed` only | Sweep transaction hash |
+| `metadata` | All (if provided) | Your custom metadata from wallet creation |
+```
+
 ### Webhook Signature Verification
 
-All webhooks are signed with HMAC-SHA256. Verify the signature to ensure authenticity:
+All webhooks are signed with HMAC-SHA256. Verify the signature to ensure authenticity.
+
+**Headers sent with each webhook:**
+
+| Header | Description |
+|--------|-------------|
+| `X-Webhook-Signature` | HMAC-SHA256 signature of the payload |
+| `X-Webhook-Timestamp` | ISO 8601 timestamp when webhook was sent |
 
 ```javascript
+const crypto = require('crypto');
+
 function verifyWebhook(payload, signature, webhookSecret) {
   const expectedSignature = crypto
     .createHmac('sha256', webhookSecret)
@@ -657,7 +702,7 @@ function verifyWebhook(payload, signature, webhookSecret) {
 }
 
 // In your webhook handler
-app.post('/webhooks/crypto', (req, res) => {
+app.post('/webhooks/crypto', express.json(), (req, res) => {
   const signature = req.headers['x-webhook-signature'];
   const payload = JSON.stringify(req.body);
 
@@ -666,20 +711,91 @@ app.post('/webhooks/crypto', (req, res) => {
   }
 
   // Process webhook
-  const { event, wallet, deposit, metadata } = req.body;
+  const { event, wallet, deposit, sweep, metadata } = req.body;
 
-  if (event === 'deposit.confirmed') {
-    // Update your order status
-    await updateOrder(metadata.orderId, {
-      status: 'paid',
-      txHash: deposit.txHash,
-      amount: deposit.amount,
-    });
+  switch (event) {
+    case 'deposit.detected':
+      console.log(`Deposit detected: ${deposit.amount} ${wallet.crypto}`);
+      // Optionally show "payment pending" to user
+      break;
+
+    case 'deposit.confirmed':
+      // Update your order status
+      await updateOrder(metadata.orderId, {
+        status: 'paid',
+        txHash: deposit.txHash,
+        amount: deposit.amount,
+      });
+      break;
+
+    case 'sweep.completed':
+      console.log(`Funds swept to your wallet: ${sweep.txHash}`);
+      break;
   }
 
   res.status(200).send('OK');
 });
 ```
+
+### Webhook Retry Policy
+
+If your endpoint returns a non-2xx status code or times out (30 seconds), we'll retry:
+
+| Attempt | Delay |
+|---------|-------|
+| 1 | Immediate |
+| 2 | 2 seconds |
+| 3 | 4 seconds |
+| 4 | 8 seconds |
+| 5 | 16 seconds |
+
+After 5 failed attempts, the webhook is marked as failed. You can check `webhook_deposit_sent` and `webhook_confirmed_sent` flags via the API.
+
+---
+
+## Auto-Sweep
+
+When you configure a `sweepAddress` in your API key, confirmed deposits are automatically swept (transferred) to your wallet.
+
+### How It Works
+
+1. Customer sends crypto to the generated deposit address
+2. Deposit is detected and you receive `deposit.detected` webhook
+3. Deposit reaches required confirmations → `deposit.confirmed` webhook
+4. Funds are automatically swept to your `sweepAddress` → `sweep.completed` webhook
+
+### Configuration
+
+Set your sweep address when creating your API key:
+
+```bash
+curl -X POST https://api.spend.2settle.io/v1/admin/api-keys \
+  -H "Authorization: Bearer ADMIN_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchantId": "your-company",
+    "name": "Production Key",
+    "permissions": ["wallet:create", "wallet:read"],
+    "webhookUrl": "https://yourapp.com/webhooks/crypto",
+    "sweepAddress": "TYourTronAddressHere"
+  }'
+```
+
+> **Note:** The `sweepAddress` should match the network you'll primarily use. For multi-network support, contact the administrator to configure per-network sweep addresses.
+
+### Sweep Thresholds
+
+To avoid losing value to network fees, we only sweep amounts above minimum thresholds:
+
+| Crypto | Minimum |
+|--------|---------|
+| BTC | 0.0001 BTC |
+| ETH | 0.001 ETH |
+| BNB | 0.001 BNB |
+| TRX | 10 TRX |
+| USDT/USDC | 1 USD |
+
+Deposits below threshold remain in the generated address until they can be economically swept.
 
 ---
 
@@ -960,4 +1076,4 @@ Use testnet networks when available, or create a separate API key for testing wi
 
 ---
 
-*Last updated: March 2024*
+*Last updated: March 2026*

@@ -58,3 +58,10 @@ export function hashRequestBody(body: unknown): string {
   const bodyString = typeof body === 'string' ? body : JSON.stringify(body || {});
   return sha256(bodyString);
 }
+
+/**
+ * Generate a webhook secret for signing webhook payloads
+ */
+export function generateWebhookSecret(): string {
+  return `whsec_${generateSecureToken(32)}`;
+}
