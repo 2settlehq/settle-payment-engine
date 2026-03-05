@@ -123,6 +123,23 @@ export interface WatchedSession {
   expiresAt: Date;
 }
 
+/** HDWaaS wallet being watched for deposits */
+export interface WatchedHDWallet {
+  id: string; // Wallet ID (wal_xxx)
+  apiKeyId: number;
+  depositAddress: string;
+  network: string;
+  chain: WatchableChain;
+  cryptoCurrency: string;
+  derivationIndex: number;
+  hdChain: string;
+  status: 'watching' | 'confirming';
+  txHash?: string;
+  amount?: number;
+  expiresAt?: Date;
+  sweepAddress?: string | null;
+}
+
 // =============================================================================
 // CONFIGURATION TYPES
 // =============================================================================

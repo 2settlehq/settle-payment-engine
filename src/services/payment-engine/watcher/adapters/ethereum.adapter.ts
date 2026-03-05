@@ -1,10 +1,10 @@
 /**
  * Ethereum Adapter
  *
- * Uses Etherscan API for Ethereum blockchain data.
+ * Uses Etherscan API V2 for Ethereum blockchain data.
  * Requires API key (free tier: 5 calls/sec).
  *
- * API Docs: https://docs.etherscan.io/
+ * API Docs: https://docs.etherscan.io/v2-migration
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
@@ -15,6 +15,14 @@ import {
   WatchableChain,
   VERIFIED_TOKENS,
 } from '../types';
+
+// Chain IDs for Etherscan V2 API
+const CHAIN_IDS: Record<WatchableChain, number> = {
+  ethereum: 1,
+  bsc: 56,
+  bitcoin: 0, // Not used for Etherscan
+  tron: 0, // Not used for Etherscan
+};
 
 // =============================================================================
 // ETHERSCAN API TYPES
@@ -70,6 +78,7 @@ interface EtherscanInternalTx {
 export class EthereumAdapter extends ChainAdapter {
   private readonly client: AxiosInstance;
   private readonly apiKey: string;
+  private readonly chainId: number;
   private cachedBlockNumber: number = 0;
   private blockNumberCacheTime: number = 0;
   private readonly BLOCK_CACHE_TTL_MS = 12000; // 12 seconds (~1 block)
@@ -78,8 +87,12 @@ export class EthereumAdapter extends ChainAdapter {
     super(chain, config);
 
     this.apiKey = config.apiKey || '';
+    this.chainId = CHAIN_IDS[chain] || 1;
+
+    // Use V2 API endpoint
+    const baseURL = config.apiUrl || 'https://api.etherscan.io/v2/api';
     this.client = axios.create({
-      baseURL: config.apiUrl || 'https://api.etherscan.io/api',
+      baseURL,
       timeout: 30000,
     });
   }
@@ -135,6 +148,7 @@ export class EthereumAdapter extends ChainAdapter {
   ): Promise<ChainTransaction[]> {
     const response = await this.client.get<EtherscanResponse<EtherscanNormalTx[]>>('', {
       params: {
+        chainid: this.chainId,
         module: 'account',
         action: 'txlist',
         address,
@@ -168,6 +182,7 @@ export class EthereumAdapter extends ChainAdapter {
 
     const response = await this.client.get<EtherscanResponse<EtherscanInternalTx[]>>('', {
       params: {
+        chainid: this.chainId,
         module: 'account',
         action: 'txlistinternal',
         address,
@@ -200,6 +215,7 @@ export class EthereumAdapter extends ChainAdapter {
   ): Promise<ChainTransaction[]> {
     const response = await this.client.get<EtherscanResponse<EtherscanTokenTx[]>>('', {
       params: {
+        chainid: this.chainId,
         module: 'account',
         action: 'tokentx',
         contractaddress: tokenAddress,
@@ -232,6 +248,7 @@ export class EthereumAdapter extends ChainAdapter {
         blockNumber: string;
       } | null>>('', {
         params: {
+          chainid: this.chainId,
           module: 'proxy',
           action: 'eth_getTransactionReceipt',
           txhash: txHash,
@@ -253,6 +270,7 @@ export class EthereumAdapter extends ChainAdapter {
         blockNumber: string;
       } | null>>('', {
         params: {
+          chainid: this.chainId,
           module: 'proxy',
           action: 'eth_getTransactionByHash',
           txhash: txHash,
@@ -305,6 +323,7 @@ export class EthereumAdapter extends ChainAdapter {
     try {
       const response = await this.client.get<EtherscanResponse<string>>('', {
         params: {
+          chainid: this.chainId,
           module: 'proxy',
           action: 'eth_blockNumber',
           apikey: this.apiKey,

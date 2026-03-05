@@ -105,7 +105,8 @@ export class SweeperService {
 
     // Get private key for signing
     const privateKey = hdWallet.getPrivateKey(request.chain, request.derivationIndex);
-    const toAddress = hdWallet.getHotWalletAddress(request.chain);
+    // Use custom destination if provided (HDWaaS), otherwise use hot wallet
+    const toAddress = request.toAddress || hdWallet.getHotWalletAddress(request.chain);
 
     // Check minimum threshold
     if (!this.meetsThreshold(request.amount, request.cryptoCurrency)) {

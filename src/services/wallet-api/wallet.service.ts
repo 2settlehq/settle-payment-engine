@@ -12,7 +12,9 @@ import {
 } from './types';
 import * as walletRepository from './wallet.repository';
 import { getHDWalletService } from '../payment-engine/hd-wallet';
-import { incrementUsage } from './usage.service';
+import { getDepositWatcher } from '../payment-engine/watcher';
+import { incrementUsage, getMonthlyUsage } from './usage.service';
+import { RateLimitTier, getTierLimits, QuotaExceededError } from '../../security/types';
 
 export class WalletServiceError extends Error {
   public readonly code: string;
@@ -54,13 +56,38 @@ function validateCryptoNetwork(crypto: string, network: string): void {
  */
 export async function createWallet(
   apiKeyId: number,
-  input: CreateWalletInput
+  input: CreateWalletInput,
+  tier: RateLimitTier = 'standard'
 ): Promise<CreateWalletResult> {
   const crypto = input.crypto.toUpperCase();
   const network = input.network.toLowerCase();
+  const limits = getTierLimits(tier);
 
   // Validate crypto/network combination
   validateCryptoNetwork(crypto, network);
+
+  // Check monthly wallet quota
+  if (limits.walletsPerMonth > 0) {
+    const monthlyUsage = await getMonthlyUsage(apiKeyId);
+    if (monthlyUsage.walletsCreated >= limits.walletsPerMonth) {
+      throw new QuotaExceededError(
+        `Monthly wallet limit exceeded (${limits.walletsPerMonth} wallets/month for ${tier} tier)`,
+        'wallets'
+      );
+    }
+  }
+
+  // Check concurrent watches limit
+  const watcher = getDepositWatcher();
+  if (watcher?.isActive()) {
+    const activeWatches = watcher.getActiveWalletWatchCount();
+    if (activeWatches >= limits.maxConcurrentWatches) {
+      throw new QuotaExceededError(
+        `Concurrent watch limit exceeded (${limits.maxConcurrentWatches} watches for ${tier} tier)`,
+        'watches'
+      );
+    }
+  }
 
   // Get HD wallet service
   const hdWallet = getHDWalletService();
@@ -75,11 +102,20 @@ export async function createWallet(
   // Derive new address
   const derivation = await hdWallet.deriveNextAddress(network as any);
 
-  // Calculate expiration
-  let expiresAt: Date | undefined;
-  if (input.expiresInMinutes) {
-    expiresAt = new Date(Date.now() + input.expiresInMinutes * 60 * 1000);
+  // Calculate expiration with tier limits
+  let expiryMinutes = input.expiresInMinutes;
+
+  // Apply default expiration if not specified
+  if (!expiryMinutes) {
+    expiryMinutes = limits.defaultWalletExpiryMinutes;
   }
+
+  // Enforce maximum expiration for tier
+  if (expiryMinutes > limits.maxWalletExpiryMinutes) {
+    expiryMinutes = limits.maxWalletExpiryMinutes;
+  }
+
+  const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
 
   // Save to database
   const wallet = await walletRepository.createWallet({
@@ -95,6 +131,20 @@ export async function createWallet(
 
   // Track usage
   await incrementUsage(apiKeyId, 'wallets_created');
+
+  // Register with deposit watcher for monitoring
+  if (watcher?.isActive()) {
+    watcher.watchWallet({
+      id: wallet.id,
+      apiKeyId,
+      address: wallet.address,
+      network: wallet.network,
+      crypto: wallet.crypto,
+      derivationIndex: wallet.derivationIndex,
+      hdChain: wallet.hdChain,
+      expiresAt: wallet.expiresAt,
+    });
+  }
 
   return {
     id: wallet.id,

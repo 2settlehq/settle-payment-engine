@@ -12,6 +12,7 @@ import { getSweeperService } from '../sweeper';
 import {
   WatcherConfig,
   WatchedSession,
+  WatchedHDWallet,
   WatchableChain,
   WatcherEvent,
   ChainTransaction,
@@ -30,6 +31,9 @@ import {
   TronAdapter,
 } from './adapters';
 import { getProcessedTxStore } from './state';
+import * as walletService from '../../wallet-api/wallet.service';
+import { sendWebhook } from '../../wallet-api/webhook.service';
+import { getWebhookConfig } from '../../../security/services/apiKey.service';
 
 // =============================================================================
 // TYPES
@@ -37,6 +41,12 @@ import { getProcessedTxStore } from './state';
 
 interface ActiveWatch {
   session: WatchedSession;
+  timer: NodeJS.Timeout;
+  lastCheck: Date;
+}
+
+interface ActiveWalletWatch {
+  wallet: WatchedHDWallet;
   timer: NodeJS.Timeout;
   lastCheck: Date;
 }
@@ -57,6 +67,7 @@ export class DepositWatcher extends EventEmitter {
   private readonly config: WatcherConfig;
   private readonly adapters: Map<WatchableChain, ChainAdapter> = new Map();
   private readonly activeWatches: Map<string, ActiveWatch> = new Map(); // sessionId -> watch
+  private readonly activeWalletWatches: Map<string, ActiveWalletWatch> = new Map(); // walletId -> watch
   private isRunning: boolean = false;
   private cleanupTimer: NodeJS.Timeout | null = null;
 
@@ -100,12 +111,44 @@ export class DepositWatcher extends EventEmitter {
     console.log(
       `[DepositWatcher] Started with chains: ${Array.from(this.adapters.keys()).join(', ')}`
     );
+
+    // Load existing HDWaaS wallets that need watching
+    await this.loadExistingWallets();
+
     console.log('[DepositWatcher] Waiting for sessions to watch...');
 
     // Start cleanup timer to remove expired sessions
     this.cleanupTimer = setInterval(() => {
       this.cleanupExpiredWatches();
     }, 60000); // Check every minute
+  }
+
+  /**
+   * Load existing HDWaaS wallets that need watching.
+   * Called on startup to resume watching wallets created before restart.
+   */
+  private async loadExistingWallets(): Promise<void> {
+    try {
+      const wallets = await walletService.getWatchingWallets();
+      console.log(`[DepositWatcher] Loading ${wallets.length} existing HDWaaS wallets...`);
+
+      for (const wallet of wallets) {
+        this.watchWallet({
+          id: wallet.id,
+          apiKeyId: wallet.apiKeyId,
+          address: wallet.address,
+          network: wallet.network,
+          crypto: wallet.crypto,
+          derivationIndex: wallet.derivationIndex,
+          hdChain: wallet.hdChain,
+          expiresAt: wallet.expiresAt,
+        });
+      }
+
+      console.log(`[DepositWatcher] Loaded ${wallets.length} HDWaaS wallets`);
+    } catch (error) {
+      console.error('[DepositWatcher] Failed to load existing wallets:', error);
+    }
   }
 
   /**
@@ -122,12 +165,19 @@ export class DepositWatcher extends EventEmitter {
       this.cleanupTimer = null;
     }
 
-    // Stop all active watches
+    // Stop all active session watches
     for (const [sessionId, watch] of this.activeWatches) {
       clearInterval(watch.timer);
       console.log(`[DepositWatcher] Stopped watching session ${sessionId.slice(0, 8)}...`);
     }
     this.activeWatches.clear();
+
+    // Stop all active wallet watches
+    for (const [walletId, watch] of this.activeWalletWatches) {
+      clearInterval(watch.timer);
+      console.log(`[DepositWatcher] Stopped watching wallet ${walletId}...`);
+    }
+    this.activeWalletWatches.clear();
 
     this.emitEvent({ type: 'watcher_stopped', timestamp: new Date() });
     console.log('[DepositWatcher] Stopped');
@@ -230,6 +280,303 @@ export class DepositWatcher extends EventEmitter {
 
     console.log(`[DepositWatcher] Stopped watching session ${sessionId.slice(0, 8)}...`);
   }
+
+  // ===========================================================================
+  // HDWAAS WALLET WATCHING
+  // ===========================================================================
+
+  /**
+   * Start watching an HDWaaS wallet for deposits.
+   * Called when a wallet is created via the wallet API.
+   */
+  watchWallet(params: {
+    id: string;
+    apiKeyId: number;
+    address: string;
+    network: string;
+    crypto: string;
+    derivationIndex: number;
+    hdChain: string;
+    expiresAt?: Date;
+  }): void {
+    if (!this.isRunning) {
+      console.warn('[DepositWatcher] Cannot watch wallet - watcher not running');
+      return;
+    }
+
+    // Check if already watching
+    if (this.activeWalletWatches.has(params.id)) {
+      console.warn(`[DepositWatcher] Already watching wallet ${params.id}`);
+      return;
+    }
+
+    const chain = NETWORK_TO_WATCHABLE_CHAIN[params.network as Network];
+    if (!chain) {
+      console.warn(`[DepositWatcher] Unknown network ${params.network} for wallet ${params.id}`);
+      return;
+    }
+
+    const adapter = this.adapters.get(chain);
+    if (!adapter) {
+      console.warn(`[DepositWatcher] No adapter for chain ${chain}, cannot watch wallet`);
+      return;
+    }
+
+    const wallet: WatchedHDWallet = {
+      id: params.id,
+      apiKeyId: params.apiKeyId,
+      depositAddress: params.address,
+      network: params.network,
+      chain,
+      cryptoCurrency: params.crypto,
+      derivationIndex: params.derivationIndex,
+      hdChain: params.hdChain,
+      status: 'watching',
+      expiresAt: params.expiresAt,
+    };
+
+    const interval = this.config.chains[chain].pollingIntervalMs;
+
+    console.log(
+      `[DepositWatcher] Watching wallet ${wallet.id} ` +
+        `(${wallet.cryptoCurrency} on ${chain}, polling every ${interval}ms)`
+    );
+
+    // Start polling for this wallet
+    const timer = setInterval(() => {
+      this.checkWallet(wallet.id).catch((err) => {
+        console.error(`[DepositWatcher] Error checking wallet ${wallet.id}:`, err.message);
+      });
+    }, interval);
+
+    // Do an immediate check
+    this.checkWallet(wallet.id).catch((err) => {
+      console.error(`[DepositWatcher] Error checking wallet ${wallet.id}:`, err.message);
+    });
+
+    this.activeWalletWatches.set(wallet.id, {
+      wallet,
+      timer,
+      lastCheck: new Date(),
+    });
+  }
+
+  /**
+   * Stop watching an HDWaaS wallet.
+   */
+  unwatchWallet(walletId: string): void {
+    const watch = this.activeWalletWatches.get(walletId);
+    if (!watch) return;
+
+    clearInterval(watch.timer);
+    this.activeWalletWatches.delete(walletId);
+
+    console.log(`[DepositWatcher] Stopped watching wallet ${walletId}`);
+  }
+
+  /**
+   * Check an HDWaaS wallet for deposits.
+   */
+  private async checkWallet(walletId: string): Promise<void> {
+    const watch = this.activeWalletWatches.get(walletId);
+    if (!watch) return;
+
+    const { wallet } = watch;
+    watch.lastCheck = new Date();
+
+    // Check if wallet has expired
+    if (wallet.expiresAt && new Date() > wallet.expiresAt) {
+      await walletService.expireOldWallets();
+      this.unwatchWallet(walletId);
+      return;
+    }
+
+    const adapter = this.adapters.get(wallet.chain);
+    if (!adapter) return;
+
+    try {
+      if (wallet.status === 'watching') {
+        await this.checkWalletForDeposit(wallet, adapter);
+      } else if (wallet.status === 'confirming' && wallet.txHash) {
+        await this.checkWalletConfirmations(wallet, adapter);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[DepositWatcher] Error checking wallet ${walletId}:`, errorMessage);
+    }
+  }
+
+  /**
+   * Check for new deposits to an HDWaaS wallet.
+   */
+  private async checkWalletForDeposit(
+    wallet: WatchedHDWallet,
+    adapter: ChainAdapter
+  ): Promise<void> {
+    const txStore = getProcessedTxStore();
+    const tokenAddress = this.getTokenAddress(wallet.network as Network, wallet.cryptoCurrency as CryptoCurrency);
+
+    const transactions = await adapter.getTransactions(wallet.depositAddress, {
+      tokenAddress,
+      limit: 10,
+    });
+
+    for (const tx of transactions) {
+      // Skip if already processed
+      const txKey = `wallet:${wallet.id}:${tx.txHash}`;
+      if (await txStore.isProcessed(tx.txHash, 'mark_deposit')) {
+        continue;
+      }
+
+      // Basic validation (must have at least 1 confirmation)
+      if (tx.confirmations < 1) continue;
+
+      // Check dust threshold
+      const dustThreshold = DUST_THRESHOLDS[wallet.chain];
+      if (tx.amountDecimal < dustThreshold) continue;
+
+      // Verify token contract if applicable
+      if (tx.tokenAddress) {
+        const expectedToken = tokenAddress;
+        if (!expectedToken || tx.tokenAddress.toLowerCase() !== expectedToken.toLowerCase()) {
+          continue; // Skip fake tokens
+        }
+      }
+
+      // Deposit detected!
+      try {
+        // Update wallet status in database
+        const updatedWallet = await walletService.markDepositDetected(
+          wallet.id,
+          tx.txHash,
+          tx.amountDecimal
+        );
+
+        if (!updatedWallet) {
+          console.warn(`[DepositWatcher] Failed to mark deposit for wallet ${wallet.id}`);
+          continue;
+        }
+
+        // Update local state for confirmation tracking
+        const watch = this.activeWalletWatches.get(wallet.id);
+        if (watch) {
+          watch.wallet = {
+            ...wallet,
+            status: 'confirming',
+            txHash: tx.txHash,
+            amount: tx.amountDecimal,
+          };
+        }
+
+        console.log(
+          `[DepositWatcher] Deposit detected for wallet ${wallet.id}: ` +
+            `${tx.amountDecimal} ${wallet.cryptoCurrency}`
+        );
+
+        // Send webhook (non-blocking)
+        sendWebhook(updatedWallet, 'deposit.detected').catch((err) => {
+          console.error(`[DepositWatcher] Failed to send deposit webhook for wallet ${wallet.id}:`, err.message);
+        });
+
+        return; // Found a match, stop checking
+      } catch (error) {
+        console.error(`[DepositWatcher] Error marking wallet deposit:`, error);
+      }
+    }
+  }
+
+  /**
+   * Check confirmations for an HDWaaS wallet with a detected deposit.
+   */
+  private async checkWalletConfirmations(
+    wallet: WatchedHDWallet,
+    adapter: ChainAdapter
+  ): Promise<void> {
+    if (!wallet.txHash) return;
+
+    const tx = await adapter.getTransaction(wallet.txHash);
+    if (!tx) {
+      console.warn(`[DepositWatcher] TX ${wallet.txHash.slice(0, 12)}... not found for wallet ${wallet.id}`);
+      return;
+    }
+
+    const requiredConfirmations = REQUIRED_CONFIRMATIONS[wallet.chain];
+    const effectiveRequired =
+      wallet.chain === 'bitcoin' && tx.isRbfEnabled
+        ? Math.max(requiredConfirmations, 3)
+        : requiredConfirmations;
+
+    // Update confirmations count
+    await walletService.updateConfirmations(wallet.id, tx.confirmations);
+
+    if (tx.confirmations >= effectiveRequired) {
+      // Confirmed!
+      try {
+        const updatedWallet = await walletService.markDepositConfirmed(
+          wallet.id,
+          tx.confirmations
+        );
+
+        if (!updatedWallet) {
+          console.warn(`[DepositWatcher] Failed to confirm deposit for wallet ${wallet.id}`);
+          return;
+        }
+
+        console.log(
+          `[DepositWatcher] Deposit confirmed for wallet ${wallet.id}: ` +
+            `${tx.confirmations} confirmations`
+        );
+
+        // Send confirmation webhook (non-blocking)
+        sendWebhook(updatedWallet, 'deposit.confirmed').catch((err) => {
+          console.error(`[DepositWatcher] Failed to send confirm webhook for wallet ${wallet.id}:`, err.message);
+        });
+
+        // Trigger sweeper if sweep address is configured
+        const webhookConfig = await getWebhookConfig(wallet.apiKeyId);
+        if (webhookConfig?.sweepAddress) {
+          const sweeper = getSweeperService();
+          if (sweeper?.isEnabled()) {
+            sweeper.sweep({
+              sessionId: wallet.id,
+              chain: wallet.hdChain as HDChain,
+              network: wallet.network as Network,
+              fromAddress: wallet.depositAddress,
+              derivationIndex: wallet.derivationIndex,
+              amount: (wallet.amount || tx.amountDecimal).toString(),
+              cryptoCurrency: wallet.cryptoCurrency as CryptoCurrency,
+              tokenContract: tx.tokenAddress,
+              toAddress: webhookConfig.sweepAddress, // Sweep to developer's address
+            }).then(async (result) => {
+              if (result.success && result.txHash) {
+                console.log(`[DepositWatcher] Sweep initiated for wallet ${wallet.id}: ${result.txHash}`);
+                // Mark as swept
+                const sweptWallet = await walletService.markSwept(wallet.id, result.txHash);
+                if (sweptWallet) {
+                  sendWebhook(sweptWallet, 'sweep.completed').catch((err) => {
+                    console.error(`[DepositWatcher] Failed to send sweep webhook:`, err.message);
+                  });
+                }
+              } else {
+                console.warn(`[DepositWatcher] Sweep failed for wallet ${wallet.id}: ${result.error}`);
+              }
+            }).catch((err) => {
+              console.error(`[DepositWatcher] Sweep error for wallet ${wallet.id}:`, err.message);
+            });
+          }
+        }
+
+        // Stop watching this wallet
+        this.unwatchWallet(wallet.id);
+      } catch (error) {
+        console.error(`[DepositWatcher] Error confirming wallet deposit:`, error);
+      }
+    }
+  }
+
+  // ===========================================================================
+  // SESSION CHECKING (existing functionality)
+  // ===========================================================================
 
   /**
    * Check a specific session for deposits.
@@ -540,6 +887,7 @@ export class DepositWatcher extends EventEmitter {
   private cleanupExpiredWatches(): void {
     const now = new Date();
 
+    // Clean up expired sessions
     for (const [sessionId, watch] of this.activeWatches) {
       if (now > watch.session.expiresAt) {
         this.emitEvent({
@@ -551,6 +899,18 @@ export class DepositWatcher extends EventEmitter {
         this.unwatchSession(sessionId);
       }
     }
+
+    // Clean up expired wallets
+    for (const [walletId, watch] of this.activeWalletWatches) {
+      if (watch.wallet.expiresAt && now > watch.wallet.expiresAt) {
+        this.unwatchWallet(walletId);
+      }
+    }
+
+    // Also expire wallets in database
+    walletService.expireOldWallets().catch((err) => {
+      console.error('[DepositWatcher] Error expiring old wallets:', err.message);
+    });
   }
 
   /**
@@ -643,6 +1003,27 @@ export class DepositWatcher extends EventEmitter {
    */
   getActiveSessionIds(): string[] {
     return Array.from(this.activeWatches.keys());
+  }
+
+  /**
+   * Get number of active wallet watches.
+   */
+  getActiveWalletWatchCount(): number {
+    return this.activeWalletWatches.size;
+  }
+
+  /**
+   * Get active wallet IDs being watched.
+   */
+  getActiveWalletIds(): string[] {
+    return Array.from(this.activeWalletWatches.keys());
+  }
+
+  /**
+   * Check if a wallet is being watched.
+   */
+  isWatchingWallet(walletId: string): boolean {
+    return this.activeWalletWatches.has(walletId);
   }
 }
 

@@ -19,7 +19,7 @@ export class BscAdapter extends EthereumAdapter {
     // Use BSC-specific defaults
     const bscConfig: ChainWatcherConfig = {
       ...config,
-      apiUrl: config.apiUrl || 'https://api.bscscan.com/api',
+      apiUrl: config.apiUrl || "https://api.etherscan.io/v2/api",
     };
 
     super(bscConfig, 'bsc');

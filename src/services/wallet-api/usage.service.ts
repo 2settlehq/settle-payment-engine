@@ -111,6 +111,54 @@ export async function getUsageRange(
 }
 
 /**
+ * Monthly usage summary for quota enforcement
+ */
+export interface MonthlyUsage {
+  walletsCreated: number;
+  depositsDetected: number;
+  depositsConfirmed: number;
+  sweepsCompleted: number;
+  webhooksSent: number;
+  webhooksFailed: number;
+  paymentsCreated: number;
+  paymentsCompleted: number;
+}
+
+/**
+ * Get usage for the current calendar month (for quota enforcement)
+ */
+export async function getMonthlyUsage(apiKeyId: number): Promise<MonthlyUsage> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT
+       COALESCE(SUM(wallets_created), 0) as wallets_created,
+       COALESCE(SUM(deposits_detected), 0) as deposits_detected,
+       COALESCE(SUM(deposits_confirmed), 0) as deposits_confirmed,
+       COALESCE(SUM(sweeps_completed), 0) as sweeps_completed,
+       COALESCE(SUM(webhooks_sent), 0) as webhooks_sent,
+       COALESCE(SUM(webhooks_failed), 0) as webhooks_failed,
+       COALESCE(SUM(payments_created), 0) as payments_created,
+       COALESCE(SUM(payments_completed), 0) as payments_completed
+     FROM api_usage
+     WHERE api_key_id = ?
+       AND YEAR(date) = YEAR(CURDATE())
+       AND MONTH(date) = MONTH(CURDATE())`,
+    [apiKeyId]
+  );
+
+  const row = rows[0];
+  return {
+    walletsCreated: Number(row.wallets_created) || 0,
+    depositsDetected: Number(row.deposits_detected) || 0,
+    depositsConfirmed: Number(row.deposits_confirmed) || 0,
+    sweepsCompleted: Number(row.sweeps_completed) || 0,
+    webhooksSent: Number(row.webhooks_sent) || 0,
+    webhooksFailed: Number(row.webhooks_failed) || 0,
+    paymentsCreated: Number(row.payments_created) || 0,
+    paymentsCompleted: Number(row.payments_completed) || 0,
+  };
+}
+
+/**
  * Get total usage for an API key (all time)
  */
 export async function getTotalUsage(

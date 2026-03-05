@@ -22,6 +22,10 @@ export interface ApiKey {
   expiresAt: Date | null;
   createdAt: Date;
   lastUsedAt: Date | null;
+  // Wallet-as-a-Service fields
+  webhookUrl: string | null;
+  webhookSecret: string | null;
+  sweepAddress: string | null;
 }
 
 export interface CreateApiKeyInput {
@@ -31,10 +35,13 @@ export interface CreateApiKeyInput {
   rateLimitTier?: RateLimitTier;
   ipWhitelist?: string[];
   expiresAt?: Date;
+  // Wallet-as-a-Service fields
+  webhookUrl?: string;
+  sweepAddress?: string;
 }
 
 export interface ApiKeyWithSecret {
-  apiKey: Omit<ApiKey, 'keyHash'>;
+  apiKey: Omit<ApiKey, 'keyHash' | 'webhookSecret'>;
   secretKey: string; // Only returned once on creation
 }
 
@@ -103,6 +110,62 @@ export interface RateLimitConfig {
   unlimited: RateLimitTierConfig;
 }
 
+// =============================================================================
+// TIER LIMITS
+// =============================================================================
+
+export interface TierLimits {
+  // Rate limiting
+  requestsPerMinute: number;
+  requestsPerMonth: number;
+
+  // Wallet limits
+  walletsPerMonth: number;
+  maxConcurrentWatches: number;
+
+  // Wallet expiration (in minutes)
+  defaultWalletExpiryMinutes: number;
+  maxWalletExpiryMinutes: number;
+}
+
+/**
+ * Tier limit configurations
+ * These define the limits for each API key tier
+ */
+export const TIER_LIMITS: Record<RateLimitTier, TierLimits> = {
+  standard: {
+    requestsPerMinute: 60,
+    requestsPerMonth: 50_000,
+    walletsPerMonth: 1_000,
+    maxConcurrentWatches: 100,
+    defaultWalletExpiryMinutes: 60, // 1 hour
+    maxWalletExpiryMinutes: 24 * 60, // 24 hours
+  },
+  premium: {
+    requestsPerMinute: 500,
+    requestsPerMonth: 1_000_000,
+    walletsPerMonth: 50_000,
+    maxConcurrentWatches: 1_000,
+    defaultWalletExpiryMinutes: 24 * 60, // 24 hours
+    maxWalletExpiryMinutes: 7 * 24 * 60, // 7 days
+  },
+  unlimited: {
+    requestsPerMinute: 1_000,
+    requestsPerMonth: -1, // Uncapped
+    walletsPerMonth: -1, // Uncapped
+    maxConcurrentWatches: 10_000,
+    defaultWalletExpiryMinutes: 7 * 24 * 60, // 7 days
+    maxWalletExpiryMinutes: 30 * 24 * 60, // 30 days
+  },
+};
+
+/**
+ * Get tier limits for a given tier
+ */
+export function getTierLimits(tier: RateLimitTier): TierLimits {
+  return TIER_LIMITS[tier];
+}
+
 export interface RateLimitState {
   keyIdentifier: string;
   windowStart: Date;
@@ -154,6 +217,16 @@ export class SecurityError extends Error {
   ) {
     super(message);
     this.name = 'SecurityError';
+  }
+}
+
+export class QuotaExceededError extends SecurityError {
+  constructor(
+    message: string,
+    public quotaType: 'requests' | 'wallets' | 'watches'
+  ) {
+    super(message, 429, 'QUOTA_EXCEEDED');
+    this.name = 'QuotaExceededError';
   }
 }
 
