@@ -166,16 +166,6 @@ export function getTierLimits(tier: RateLimitTier): TierLimits {
   return TIER_LIMITS[tier];
 }
 
-export class QuotaExceededError extends SecurityError {
-  constructor(
-    message: string,
-    public quotaType: 'requests' | 'wallets' | 'watches'
-  ) {
-    super(message, 429, 'QUOTA_EXCEEDED');
-    this.name = 'QuotaExceededError';
-  }
-}
-
 export interface RateLimitState {
   keyIdentifier: string;
   windowStart: Date;
@@ -227,6 +217,16 @@ export class SecurityError extends Error {
   ) {
     super(message);
     this.name = 'SecurityError';
+  }
+}
+
+export class QuotaExceededError extends SecurityError {
+  constructor(
+    message: string,
+    public quotaType: 'requests' | 'wallets' | 'watches'
+  ) {
+    super(message, 429, 'QUOTA_EXCEEDED');
+    this.name = 'QuotaExceededError';
   }
 }
 
