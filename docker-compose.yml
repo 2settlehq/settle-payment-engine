@@ -1,17 +1,10 @@
-# =============================================================================
-# Payment Engine - Docker Compose
-# =============================================================================
-# Usage:
+
 #   Development:  docker compose up -d
 #   Production:   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #   Logs:         docker compose logs -f payment-engine
 #   Stop:         docker compose down
-# =============================================================================
 
 services:
-  # ---------------------------------------------------------------------------
-  # Payment Engine API
-  # ---------------------------------------------------------------------------
   payment-engine:
     build:
       context: .
@@ -24,11 +17,11 @@ services:
       - NODE_ENV=production
       - PORT=3500
       # Database
-      - DB_HOST=mysql
-      - DB_PORT=3306
+      - DB_HOST=${DB_HOST:-mysql}
+      - DB_PORT=${DB_PORT:-3306}
       - DB_USER=${DB_USER:-root}
       - DB_PASSWORD=${DB_PASSWORD}
-      - DB_NAME=${DB_NAME:-2settle}
+      - DB_NAME=${DB_NAME:-2settle_db}
       # Admin
       - ADMIN_SECRET=${ADMIN_SECRET}
       # External APIs
@@ -72,16 +65,14 @@ services:
       retries: 3
       start_period: 10s
 
-  # ---------------------------------------------------------------------------
   # MySQL Database
-  # ---------------------------------------------------------------------------
   mysql:
     image: mysql:8.0
     container_name: payment-mysql
     restart: unless-stopped
     environment:
       - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
-      - MYSQL_DATABASE=${DB_NAME:-2settle}
+      - MYSQL_DATABASE=${DB_NAME:-2settle_db}
     volumes:
       - mysql_data:/var/lib/mysql
       - ./src/services/payment-engine/migrations:/docker-entrypoint-initdb.d:ro
@@ -96,9 +87,7 @@ services:
       retries: 5
       start_period: 30s
 
-# =============================================================================
 # Networks & Volumes
-# =============================================================================
 networks:
   payment-network:
     driver: bridge
