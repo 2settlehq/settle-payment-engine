@@ -3,3 +3,12 @@ dist
 .env
 *.log
 .DS_Store
+
+# deployment
+
+/CLAUDE.md
+
+# generated/utility scripts
+/*.js
+/*.mjs
+
