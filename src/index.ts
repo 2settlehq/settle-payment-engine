@@ -52,6 +52,16 @@ app.use(rateLimit);
 // ROUTES
 // =============================================================================
 
+// Root path
+app.get("/", (req: Request, res: Response) => {
+  res.json({
+    name: "2Settle Payment Engine",
+    version: "1.0.0",
+    base: "/v1",
+    health: "/v1/health",
+  });
+});
+
 // Health check (public, no auth required)
 app.get("/v1/health", (req: Request, res: Response) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
