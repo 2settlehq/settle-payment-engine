@@ -68,7 +68,7 @@ Contact the administrator to create an API key with wallet permissions:
 
 ```bash
 # Admin creates your API key
-curl -X POST https://api.spend.2settle.io/v1/admin/api-keys \
+curl -X POST https://api.2settle.io/v1/admin/api-keys \
   -H "Authorization: Bearer ADMIN_SECRET" \
   -H "Content-Type: application/json" \
   -d '{
@@ -86,7 +86,7 @@ You'll receive:
 ### Step 2: Generate Your First Address
 
 ```bash
-curl -X POST https://api.spend.2settle.io/v1/wallets \
+curl -X POST https://api.2settle.io/v1/wallets \
   -H "Content-Type: application/json" \
   -H "X-API-Key: pk_your_api_key" \
   -H "X-Timestamp: 1709472000000" \
@@ -183,10 +183,10 @@ We use `SHA256(secretKey)` as the HMAC key for security:
 ### Base URL
 
 ```
-https://api.spend.2settle.io
+https://api.2settle.io
 ```
 
-All API endpoints are prefixed with `/v1`. For example: `https://api.spend.2settle.io/v1/wallets`
+All API endpoints are prefixed with `/v1`. For example: `https://api.2settle.io/v1/wallets`
 
 ### Create Wallet
 
@@ -341,7 +341,7 @@ GET /v1/wallets?status=confirmed&limit=10&offset=0
 const crypto = require('crypto');
 
 class HDWaaSClient {
-  constructor(apiKey, secretKey, baseUrl = 'https://api.spend.2settle.io') {
+  constructor(apiKey, secretKey, baseUrl = 'https://api.2settle.io') {
     this.apiKey = apiKey;
     this.secretKey = secretKey;
     this.baseUrl = baseUrl;
@@ -432,7 +432,7 @@ import time
 import requests
 
 class HDWaaSClient:
-    def __init__(self, api_key: str, secret_key: str, base_url: str = 'https://api.spend.2settle.io'):
+    def __init__(self, api_key: str, secret_key: str, base_url: str = 'https://api.2settle.io'):
         self.api_key = api_key
         self.secret_key = secret_key
         self.base_url = base_url
@@ -514,7 +514,7 @@ class HDWaaSClient {
     private string $secretKey;
     private string $baseUrl;
 
-    public function __construct(string $apiKey, string $secretKey, string $baseUrl = 'https://api.spend.2settle.io') {
+    public function __construct(string $apiKey, string $secretKey, string $baseUrl = 'https://api.2settle.io') {
         $this->apiKey = $apiKey;
         $this->secretKey = $secretKey;
         $this->baseUrl = $baseUrl;
@@ -600,7 +600,7 @@ Webhooks notify your application in real-time when deposits are detected, confir
 Configure your webhook URL and sweep address when creating your API key:
 
 ```bash
-curl -X POST https://api.spend.2settle.io/v1/admin/api-keys \
+curl -X POST https://api.2settle.io/v1/admin/api-keys \
   -H "Authorization: Bearer ADMIN_SECRET" \
   -H "Content-Type: application/json" \
   -d '{
@@ -769,7 +769,7 @@ When you configure a `sweepAddress` in your API key, confirmed deposits are auto
 Set your sweep address when creating your API key:
 
 ```bash
-curl -X POST https://api.spend.2settle.io/v1/admin/api-keys \
+curl -X POST https://api.2settle.io/v1/admin/api-keys \
   -H "Authorization: Bearer ADMIN_SECRET" \
   -H "Content-Type: application/json" \
   -d '{

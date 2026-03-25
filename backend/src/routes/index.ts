@@ -9,6 +9,8 @@ import cryptoRoutes from './crypto.routes';
 import adminRoutes from './admin';
 import paymentRoutes from './payment.routes';
 import walletRoutes from './wallet.routes';
+import authRoutes from './auth.routes';
+import meRoutes from './me.routes';
 import {
   deprecateTransferRoutes,
   deprecateGiftRoutes,
@@ -45,5 +47,11 @@ router.use('/crypto', cryptoRoutes);
 
 // Admin routes (uses separate admin auth, not HMAC)
 router.use('/admin', adminRoutes);
+
+// Auth routes (public - login with API key credentials)
+router.use('/auth', authRoutes);
+
+// Me routes (HMAC-authenticated, user-scoped)
+router.use('/me', meRoutes);
 
 export default router;

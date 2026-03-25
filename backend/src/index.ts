@@ -15,7 +15,10 @@ import { createDepositWatcher, WatcherConfig } from './services/payment-engine/w
 import { createHDWalletService, destroyHDWalletService } from './services/payment-engine/hd-wallet';
 import { createSweeperService, destroySweeperService, SweeperConfig } from './services/payment-engine/sweeper';
 import dotenv from "dotenv";
-dotenv.config();
+import path from "path";
+// In Docker the env vars come from docker-compose. For local dev, load from
+// root .env (one level above backend/) so a single file covers both contexts.
+dotenv.config({ path: path.join(__dirname, '../../.env') });
 
 const app = express();
 
@@ -30,7 +33,16 @@ app.use(securityHeaders);
 app.use(requestContext);
 
 // 3. CORS (before body parsing)
-app.use(cors());
+const corsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  : ['http://localhost:3000'];
+
+app.use(cors({
+  origin: corsOrigins,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-Timestamp', 'X-Signature'],
+  credentials: true,
+}));
 
 // 4. Body parsing
 app.use(express.json());

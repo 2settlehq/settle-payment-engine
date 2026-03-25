@@ -92,7 +92,7 @@ Request an API key from the administrator:
 
 ```bash
 # Admin creates your API key
-curl -X POST https://api.spend.2settle.io/v1/admin/api-keys \
+curl -X POST https://api.2settle.io/v1/admin/api-keys \
   -H "Authorization: Bearer ADMIN_SECRET" \
   -H "Content-Type: application/json" \
   -d '{
@@ -123,7 +123,7 @@ Response:
 ### Step 2: Create Your First Payment
 
 ```bash
-curl -X POST https://api.spend.2settle.io/v1/payments \
+curl -X POST https://api.2settle.io/v1/payments \
   -H "Content-Type: application/json" \
   -H "X-API-Key: pk_your_api_key" \
   -H "X-Timestamp: 1709472000000" \
@@ -179,7 +179,7 @@ Show the user:
 Poll the status or wait for callback:
 
 ```bash
-curl -X GET https://api.spend.2settle.io/v1/payments/2S-A1B2C3 \
+curl -X GET https://api.2settle.io/v1/payments/2S-A1B2C3 \
   -H "X-API-Key: pk_your_api_key" \
   -H "X-Timestamp: 1709472000000" \
   -H "X-Signature: your_hmac_signature"
@@ -314,10 +314,10 @@ E-commerce checkout flow (customizable).
 ### Base URL
 
 ```
-https://api.spend.2settle.io
+https://api.2settle.io
 ```
 
-All API endpoints are prefixed with `/v1`. For example: `https://api.spend.2settle.io/v1/payments`
+All API endpoints are prefixed with `/v1`. For example: `https://api.2settle.io/v1/payments`
 
 ### Permissions
 
@@ -782,7 +782,7 @@ console.log(fulfilled.depositAddress);
 const crypto = require('crypto');
 
 class PaymentEngineClient {
-  constructor(apiKey, secretKey, baseUrl = 'https://api.spend.2settle.io') {
+  constructor(apiKey, secretKey, baseUrl = 'https://api.2settle.io') {
     this.apiKey = apiKey;
     this.secretKey = secretKey;
     this.baseUrl = baseUrl;
@@ -868,7 +868,7 @@ import time
 import requests
 
 class PaymentEngineClient:
-    def __init__(self, api_key: str, secret_key: str, base_url: str = 'https://api.spend.2settle.io'):
+    def __init__(self, api_key: str, secret_key: str, base_url: str = 'https://api.2settle.io'):
         self.api_key = api_key
         self.secret_key = secret_key
         self.base_url = base_url
@@ -959,7 +959,7 @@ class PaymentEngineClient {
     private string $secretKey;
     private string $baseUrl;
 
-    public function __construct(string $apiKey, string $secretKey, string $baseUrl = 'https://api.spend.2settle.io') {
+    public function __construct(string $apiKey, string $secretKey, string $baseUrl = 'https://api.2settle.io') {
         $this->apiKey = $apiKey;
         $this->secretKey = $secretKey;
         $this->baseUrl = $baseUrl;

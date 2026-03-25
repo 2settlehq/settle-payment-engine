@@ -1,6 +1,9 @@
 import dotenv from "dotenv";
+import path from "path";
 
-dotenv.config();
+// .env lives at the project root (one level above backend/)
+// Works from both src/ (ts-node) and dist/ (compiled)
+dotenv.config({ path: path.join(__dirname, "../../../.env") });
 
 export const config = {
   port: parseInt(process.env.PORT || "3500", 10),
@@ -209,6 +212,7 @@ export const config = {
       "/v1/banks/list",
       "/v1/admin/*",
       "/v1/webhooks/*",
+      "/v1/auth/*",
     ],
   },
 };

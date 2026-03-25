@@ -8,6 +8,9 @@ import {
   updateParentWallets,
   revokeApiKey,
 } from '../../security/services/apiKey.service';
+import { settlementService } from '../../services/payment-engine/settlement/settlement.service';
+import { pool } from '../../lib/mysql';
+import { RowDataPacket } from 'mysql2';
 import { RateLimitTier } from '../../security/types';
 
 const router = Router();
@@ -30,6 +33,9 @@ const updateApiKeySchema = z.object({
   permissions: z.array(z.string()).optional(),
   rateLimitTier: z.enum(['standard', 'premium', 'unlimited']).optional(),
   ipWhitelist: z.array(z.string()).nullable().optional(),
+  webhookUrl: z.string().url().nullable().optional(),
+  sweepAddress: z.string().nullable().optional(),
+  settlementMode: z.enum(['mongoro', 'self']).optional(),
 });
 
 // =============================================================================
@@ -89,23 +95,48 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
  */
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const merchantId = req.query.merchantId as string;
+    const merchantId = req.query.merchantId as string | undefined;
 
-    if (!merchantId) {
-      return res.status(400).json({
-        error: 'merchantId query parameter is required',
-        code: 'MISSING_MERCHANT_ID',
+    let keys;
+    if (merchantId) {
+      keys = await listApiKeysByMerchant(merchantId);
+    } else {
+      // List all keys across all merchants
+      const [rows] = await pool.execute<RowDataPacket[]>(
+        'SELECT * FROM api_keys ORDER BY created_at DESC'
+      );
+      const { listApiKeysByMerchant: _, ...svc } = await import('../../security/services/apiKey.service');
+      // Re-use rowToApiKey via full fetch - just map the rows
+      keys = rows.map((row) => {
+        let permissions: string[] = [];
+        if (row.permissions) {
+          permissions = typeof row.permissions === 'string' ? JSON.parse(row.permissions) : row.permissions;
+        }
+        let ipWhitelist: string[] | null = null;
+        if (row.ip_whitelist) {
+          ipWhitelist = typeof row.ip_whitelist === 'string' ? JSON.parse(row.ip_whitelist) : row.ip_whitelist;
+        }
+        return {
+          id: row.id, keyId: row.key_id, merchantId: row.merchant_id, name: row.name,
+          permissions, rateLimitTier: row.rate_limit_tier, ipWhitelist,
+          isActive: Boolean(row.is_active), expiresAt: row.expires_at,
+          createdAt: row.created_at, lastUsedAt: row.last_used_at,
+          webhookUrl: row.webhook_url, sweepAddress: row.sweep_address,
+          settlementMode: row.settlement_mode ?? 'self',
+          fundingWalletIndex: row.funding_wallet_index ?? null,
+          fundingWalletBitcoin: row.funding_wallet_bitcoin ?? null,
+          fundingWalletEthereum: row.funding_wallet_ethereum ?? null,
+          fundingWalletTron: row.funding_wallet_tron ?? null,
+          parentWalletBitcoin: row.parent_wallet_bitcoin ?? null,
+          parentWalletEthereum: row.parent_wallet_ethereum ?? null,
+          parentWalletTron: row.parent_wallet_tron ?? null,
+        };
       });
     }
 
-    const keys = await listApiKeysByMerchant(merchantId);
-
     return res.status(200).json({
       status: true,
-      data: {
-        keys,
-        count: keys.length,
-      },
+      data: { keys, count: keys.length },
     });
   } catch (err) {
     next(err);
@@ -181,6 +212,9 @@ router.patch('/:keyId', async (req: Request, res: Response, next: NextFunction) 
       permissions: parsed.data.permissions,
       rateLimitTier: parsed.data.rateLimitTier as RateLimitTier | undefined,
       ipWhitelist: parsed.data.ipWhitelist,
+      webhookUrl: parsed.data.webhookUrl,
+      sweepAddress: parsed.data.sweepAddress,
+      settlementMode: parsed.data.settlementMode,
     });
 
     if (!updated) {
@@ -312,6 +346,31 @@ router.put('/:keyId/wallets', async (req: Request, res: Response, next: NextFunc
         parentWalletTron: updated?.parentWalletTron,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// =============================================================================
+// MANUAL SETTLEMENT
+// =============================================================================
+
+/**
+ * POST /admin/sessions/:reference/settle
+ * Manually mark a session as settled (for stuck or self-settlement-mode payments).
+ */
+router.post('/sessions/:reference/settle', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { reference } = req.params;
+    const { settlementReference } = req.body as { settlementReference?: string };
+
+    const result = await settlementService.manualSettle(reference);
+
+    if (!result.success) {
+      return res.status(400).json({ error: result.message, code: 'SETTLE_FAILED' });
+    }
+
+    return res.json({ status: true, message: result.message });
   } catch (err) {
     next(err);
   }
