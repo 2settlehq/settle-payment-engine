@@ -52,7 +52,8 @@ export const config = {
           10,
         ),
         // Etherscan V2 API uses a single endpoint for all chains - same API key works
-        apiKey: process.env.BSCSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || "",
+        apiKey:
+          process.env.BSCSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || "",
         apiUrl:
           process.env.BSCSCAN_API_URL || "https://api.etherscan.io/v2/api",
         rateLimitMs: parseInt(
@@ -213,6 +214,7 @@ export const config = {
       "/v1/admin/*",
       "/v1/webhooks/*",
       "/v1/auth/*",
+      "/v1/payments/:reference",
     ],
   },
 };

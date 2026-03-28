@@ -139,7 +139,6 @@ router.post(
  */
 router.get(
   '/:reference',
-  requirePermission('payment:read'),
   async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { reference } = req.params;
@@ -167,7 +166,6 @@ router.get(
         fiatAmount: session.fiatAmount,
         fiatCurrency: session.fiatCurrency,
         rate: session.rate,
-        chargeAmount: session.chargeAmount,
         txHash: session.txHash,
         confirmations: session.confirmations,
         receivedAmount: session.receivedAmount,
