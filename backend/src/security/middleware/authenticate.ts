@@ -25,6 +25,13 @@ function isPublicPath(path: string): boolean {
       return path.startsWith(prefix + '/') || path === prefix;
     }
 
+    // Express param match (e.g., "/v1/payments/:reference" matches "/v1/payments/2S-ABC123")
+    if (publicPath.includes('/:')) {
+      const pattern = publicPath.replace(/:[^/]+/g, '[^/]+');
+      const regex = new RegExp(`^${pattern.replace(/\//g, '\\/')}$`);
+      return regex.test(path);
+    }
+
     return false;
   });
 }

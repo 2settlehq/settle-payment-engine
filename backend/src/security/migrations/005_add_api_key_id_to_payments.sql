@@ -5,3 +5,4 @@
 ALTER TABLE payment_sessions
   ADD COLUMN api_key_id INT NULL AFTER merchant_id,
   ADD INDEX idx_payment_sessions_api_key_id (api_key_id);
+

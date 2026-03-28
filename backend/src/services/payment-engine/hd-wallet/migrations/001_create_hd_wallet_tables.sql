@@ -64,10 +64,12 @@ INSERT INTO hd_wallet_config (chain, derivation_path_base, next_index, hot_walle
 ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP;
 
 -- Add HD wallet columns to payment_sessions table
-ALTER TABLE payment_sessions
-  ADD COLUMN IF NOT EXISTS derivation_index BIGINT UNSIGNED NULL AFTER wallet_id,
-  ADD COLUMN IF NOT EXISTS hd_chain VARCHAR(20) NULL AFTER network,
-  MODIFY COLUMN wallet_id INT NULL;
+-- NOTE: Skip this block if columns already exist (already applied)
+-- ALTER TABLE payment_sessions
+--   ADD COLUMN derivation_index BIGINT UNSIGNED NULL AFTER wallet_id,
+--   ADD COLUMN hd_chain VARCHAR(20) NULL AFTER network,
+--   MODIFY COLUMN wallet_id INT NULL;
 
 -- Add index for HD wallet lookups
-CREATE INDEX IF NOT EXISTS idx_hd_derivation ON payment_sessions (hd_chain, derivation_index);
+-- NOTE: Skip if index already exists
+-- CREATE INDEX idx_hd_derivation ON payment_sessions (hd_chain, derivation_index);

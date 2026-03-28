@@ -25,11 +25,12 @@ CREATE TABLE IF NOT EXISTS settlement_attempts (
   FOREIGN KEY (session_id) REFERENCES payment_sessions(id) ON DELETE RESTRICT
 );
 
--- Add settlement fields to payment_sessions if not exists
-ALTER TABLE payment_sessions
-  ADD COLUMN IF NOT EXISTS settlement_reference VARCHAR(100) NULL AFTER settled_at,
-  ADD COLUMN IF NOT EXISTS settlement_provider VARCHAR(50) NULL DEFAULT 'mongoro' AFTER settlement_reference,
-  ADD COLUMN IF NOT EXISTS settlement_started_at TIMESTAMP NULL AFTER settlement_provider;
+-- Add settlement fields to payment_sessions
+-- NOTE: Skip this block if columns already exist (already applied)
+-- ALTER TABLE payment_sessions
+--   ADD COLUMN settlement_reference VARCHAR(100) NULL AFTER settled_at,
+--   ADD COLUMN settlement_provider VARCHAR(50) NULL DEFAULT 'mongoro' AFTER settlement_reference,
+--   ADD COLUMN settlement_started_at TIMESTAMP NULL AFTER settlement_provider;
 
 -- Add settlement_reversed status if not already present
 -- Note: This ALTER may fail if the enum already includes this value - that's OK
