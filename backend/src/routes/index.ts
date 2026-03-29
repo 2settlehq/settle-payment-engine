@@ -11,6 +11,7 @@ import paymentRoutes from './payment.routes';
 import walletRoutes from './wallet.routes';
 import authRoutes from './auth.routes';
 import meRoutes from './me.routes';
+import webhookRoutes from './webhook.routes';
 import {
   deprecateTransferRoutes,
   deprecateGiftRoutes,
@@ -44,6 +45,9 @@ router.use('/transaction', deprecateTransactionRoutes, transactionRoutes);
 router.use('/rate', rateRoutes);
 router.use('/banks', bankRoutes);
 router.use('/crypto', cryptoRoutes);
+
+// Webhook routes (public - provider signature verification handled internally)
+router.use('/webhooks', webhookRoutes);
 
 // Admin routes (uses separate admin auth, not HMAC)
 router.use('/admin', adminRoutes);

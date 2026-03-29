@@ -8,6 +8,7 @@
 import config from '../../../config';
 import { pool } from '../../../lib/mysql';
 import { MongoroService, mongoroService } from './mongoro.service';
+import { PaystackService, paystackService } from './paystack.service';
 import { TelegramService, telegramService, SessionAlertData } from './telegram.service';
 import { sendPaymentWebhook } from '../payment-webhook.service';
 import {
@@ -15,6 +16,7 @@ import {
   SettlementAttempt,
   CreateSettlementAttemptData,
   MongoroWebhookPayload,
+  PaystackWebhookPayload,
 } from './types';
 import { getApiKeyById } from '../../../security/services/apiKey.service';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
@@ -47,15 +49,18 @@ interface SessionRow extends RowDataPacket {
 export class SettlementService {
   private readonly config: SettlementConfig;
   private readonly mongoro: MongoroService;
+  private readonly paystack: PaystackService;
   private readonly telegram: TelegramService;
 
   constructor(
     settlementConfig: SettlementConfig = config.settlement,
     mongoroSvc: MongoroService = mongoroService,
+    paystackSvc: PaystackService = paystackService,
     telegramSvc: TelegramService = telegramService
   ) {
     this.config = settlementConfig;
     this.mongoro = mongoroSvc;
+    this.paystack = paystackSvc;
     this.telegram = telegramSvc;
   }
 
@@ -123,7 +128,49 @@ export class SettlementService {
       return;
     }
 
-    // 5. Mongoro mode: create attempt record
+    const narration = `2Settle ${session.reference}`;
+
+    if (settlementMode === 'paystack') {
+      // 5a. Paystack mode
+      const attemptId = await this.createSettlementAttempt({
+        sessionId,
+        provider: 'paystack',
+        status: 'pending',
+        amount: session.fiat_amount,
+        accountNumber: receiver.accountNumber,
+        bankCode: receiver.bankCode,
+        accountName: receiver.accountName,
+      });
+
+      const response = await this.paystack.transfer(
+        receiver.accountNumber,
+        receiver.bankCode,
+        receiver.accountName,
+        session.fiat_amount,
+        narration,
+        session.fiat_currency
+      );
+
+      if (response.success && response.data?.reference) {
+        await this.updateSettlementAttempt(attemptId, {
+          status: 'pending',
+          reference: response.data.reference,
+          responsePayload: response.data as unknown as Record<string, unknown>,
+        });
+        await this.updateSessionSettlement(sessionId, response.data.reference, 'paystack');
+        console.log(`[Settlement][Paystack] Initiated for ${session.reference}, ref: ${response.data.reference}`);
+      } else {
+        await this.updateSettlementAttempt(attemptId, {
+          status: 'failed',
+          errorMessage: response.message,
+          responsePayload: response as unknown as Record<string, unknown>,
+        });
+        await this.handleSettlementFailure(session, receiver, response.message);
+      }
+      return;
+    }
+
+    // 5b. Mongoro mode: create attempt record
     const attemptData: CreateSettlementAttemptData = {
       sessionId,
       provider: 'mongoro',
@@ -137,7 +184,6 @@ export class SettlementService {
     const attemptId = await this.createSettlementAttempt(attemptData);
 
     // 6. Call Mongoro API
-    const narration = `2Settle ${session.reference}`;
     const response = await this.mongoro.transfer(
       receiver.accountNumber,
       receiver.bankCode,
@@ -156,7 +202,7 @@ export class SettlementService {
         responsePayload: response.data as unknown as Record<string, unknown>,
       });
 
-      await this.updateSessionSettlement(sessionId, response.data.reference);
+      await this.updateSessionSettlement(sessionId, response.data.reference, 'mongoro');
 
       console.log(`[Settlement] Initiated for ${session.reference}, ref: ${response.data.reference}`);
     } else {
@@ -251,6 +297,68 @@ export class SettlementService {
       console.error(`[Settlement] Both Mongoro and Telegram failed for ${session.reference}, marking as failed`);
       await this.updateSessionStatus(session.id, 'failed');
       sendPaymentWebhook(session.id, 'payment.failed').catch(() => {});
+    }
+  }
+
+  /**
+   * Handle Paystack webhook callback
+   */
+  async handlePaystackWebhook(payload: PaystackWebhookPayload): Promise<void> {
+    const { event, data } = payload;
+    const reference = data?.reference;
+
+    if (!reference) {
+      console.error('[Settlement][Paystack] Webhook missing reference');
+      return;
+    }
+
+    const session = await this.getSessionBySettlementReference(reference);
+    if (!session) {
+      console.error(`[Settlement][Paystack] No session found for reference: ${reference}`);
+      return;
+    }
+
+    if (session.status !== 'settling') {
+      console.warn(`[Settlement][Paystack] Webhook for ${reference} but session status is ${session.status}`);
+      return;
+    }
+
+    const attempt = await this.getSettlementAttemptByReference(reference);
+
+    if (event === 'transfer.success') {
+      if (attempt) {
+        await this.updateSettlementAttempt(attempt.id, {
+          status: 'success',
+          responsePayload: payload as unknown as Record<string, unknown>,
+        });
+      }
+      await this.markSessionSettled(session.id);
+      sendPaymentWebhook(session.id, 'payment.settled').catch(() => {});
+      console.log(`[Settlement][Paystack] Completed for ${session.reference}`);
+    } else if (event === 'transfer.failed' || event === 'transfer.reversed') {
+      if (attempt) {
+        await this.updateSettlementAttempt(attempt.id, {
+          status: event === 'transfer.reversed' ? 'reversed' : 'failed',
+          responsePayload: payload as unknown as Record<string, unknown>,
+        });
+      }
+      await this.updateSessionStatus(session.id, 'settlement_reversed');
+      sendPaymentWebhook(session.id, 'payment.settlement_reversed').catch(() => {});
+
+      const sessionData = await this.getSession(session.id);
+      if (sessionData) {
+        await this.telegram.sendSettlementReversalAlert(
+          {
+            reference: sessionData.reference,
+            fiatAmount: sessionData.fiat_amount,
+            fiatCurrency: sessionData.fiat_currency,
+          },
+          reference,
+          `Paystack transfer ${event.replace('transfer.', '')}`
+        );
+      }
+
+      console.error(`[Settlement][Paystack] ${event} for ${session.reference}`);
     }
   }
 
@@ -351,7 +459,7 @@ export class SettlementService {
   // DATABASE HELPERS
   // =============================================================================
 
-  private async getSettlementMode(apiKeyId: number | null | undefined): Promise<'mongoro' | 'self'> {
+  private async getSettlementMode(apiKeyId: number | null | undefined): Promise<'mongoro' | 'paystack' | 'self'> {
     if (!apiKeyId) return 'mongoro';
     try {
       const apiKey = await getApiKeyById(apiKeyId);
@@ -415,12 +523,12 @@ export class SettlementService {
     );
   }
 
-  private async updateSessionSettlement(sessionId: string, reference: string): Promise<void> {
+  private async updateSessionSettlement(sessionId: string, reference: string, provider: string = 'mongoro'): Promise<void> {
     await pool.execute(
       `UPDATE payment_sessions
-       SET settlement_reference = ?, settlement_provider = 'mongoro', settlement_started_at = NOW(), updated_at = NOW()
+       SET settlement_reference = ?, settlement_provider = ?, settlement_started_at = NOW(), updated_at = NOW()
        WHERE id = ?`,
-      [reference, sessionId]
+      [reference, provider, sessionId]
     );
   }
 

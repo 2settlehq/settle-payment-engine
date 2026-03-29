@@ -108,6 +108,10 @@ export const config = {
       transferPin: process.env.MONGORO_TRANSFERPIN || "",
       callbackUrl: process.env.MONGORO_CALLBACK_URL || "",
     },
+    paystack: {
+      secretKey: process.env.PAYSTACK_SECRET_KEY || "",
+      webhookSecret: process.env.PAYSTACK_WEBHOOK_SECRET || "",
+    },
     telegram: {
       enabled: process.env.TELEGRAM_ALERTS_ENABLED === "true",
       botToken: process.env.TELEGRAM_BOT_TOKEN || "",

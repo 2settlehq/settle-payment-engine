@@ -35,7 +35,7 @@ const updateApiKeySchema = z.object({
   ipWhitelist: z.array(z.string()).nullable().optional(),
   webhookUrl: z.string().url().nullable().optional(),
   sweepAddress: z.string().nullable().optional(),
-  settlementMode: z.enum(['mongoro', 'self']).optional(),
+  settlementMode: z.enum(['mongoro', 'paystack', 'self']).optional(),
 });
 
 // =============================================================================

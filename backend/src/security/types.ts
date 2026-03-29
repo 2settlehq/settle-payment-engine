@@ -26,7 +26,7 @@ export interface ApiKey {
   webhookUrl: string | null;
   webhookSecret: string | null;
   sweepAddress: string | null;
-  settlementMode: 'mongoro' | 'self';
+  settlementMode: 'mongoro' | 'paystack' | 'self';
   // Per-key merchant wallets
   fundingWalletIndex: number | null;
   fundingWalletBitcoin: string | null;
