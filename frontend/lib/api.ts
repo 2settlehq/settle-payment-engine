@@ -1,6 +1,6 @@
 import { getSession } from './auth';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3500/v1';
+const API_URL = process.env.NEXT_PUBLIC_SETTLE_API_URL ?? 'http://localhost:3500/v1';
 
 // =============================================================================
 // HMAC signing (mirrors backend: sha256(secretKey) as HMAC key)

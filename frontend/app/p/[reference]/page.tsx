@@ -448,7 +448,7 @@ export default function PaymentPage() {
   const callbackUrlRef = useRef(callbackUrl)
   callbackUrlRef.current = callbackUrl
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3500/v1'
+  const apiBase = process.env.NEXT_PUBLIC_SETTLE_API_URL ?? 'http://localhost:3500/v1'
 
   // -------------------------------------------------------------------------
   // Fetch payment
