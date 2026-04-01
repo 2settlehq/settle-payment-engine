@@ -355,7 +355,162 @@ Settlement fires immediately. NGN is sent to the recipient's bank account. Poll 
 
 ### Request (Two-Phase)
 
-> Documentation coming soon.
+A request lets the receiver specify the fiat amount upfront. The payer fulfills it later by choosing which crypto to pay with. The rate locks at fulfillment time, not creation.
+
+#### Phase 1 — Receiver creates the request
+
+**Step 1 — Find the bank code**
+
+```http
+GET /v1/banks/list?name=mon
+```
+
+```json
+{
+  "message": [
+    "1. MONEYTRUST MFB 090129",
+    "2. MONIEPOINT MICROFINANCE BANK 090405",
+    "3. Monarch Microfinance Bank 090462",
+    "4. Money Master PSB 120005"
+  ]
+}
+```
+
+**Step 2 — Verify the receiver's account**
+
+```http
+POST /v1/payments/verify-receiver
+Content-Type: application/json
+
+{
+  "bankCode": "090405",
+  "accountNumber": "8012345678"
+}
+```
+
+```json
+{
+  "success": true,
+  "receiver": {
+    "accountName": "JOHN DOE",
+    "accountNumber": "8012345678",
+    "bankName": "MONIEPOINT MICROFINANCE BANK",
+    "bankCode": "090405"
+  }
+}
+```
+
+**Step 3 — Create the request**
+
+No crypto or network at this point — those are chosen by the payer at fulfillment.
+
+```http
+POST /v1/payments
+X-API-Key: pk_xxxxx
+X-Timestamp: <unix ms>
+X-Signature: <hmac>
+Content-Type: application/json
+
+{
+  "type": "request",
+  "fiatAmount": 15000,
+  "fiatCurrency": "NGN",
+  "receiver": {
+    "bankCode": "090405",
+    "accountNumber": "8012345678"
+  }
+}
+```
+
+```json
+{
+  "success": true,
+  "payment": {
+    "id": 54,
+    "reference": "2S-RQ7YNM",
+    "type": "request",
+    "status": "created",
+    "depositAddress": null,
+    "cryptoAmount": null,
+    "crypto": null,
+    "network": null,
+    "fiatAmount": 15000,
+    "fiatCurrency": "NGN",
+    "rate": null,
+    "chargeAmount": null,
+    "expiresAt": null
+  }
+}
+```
+
+Receiver shares `reference` (`2S-RQ7YNM`) with the payer.
+
+---
+
+#### Phase 2 — Payer fulfills the request
+
+**Step 1 — Payer pulls the request details**
+
+```http
+GET /v1/payments/2S-RQ7YNM
+```
+
+```json
+{
+  "success": true,
+  "payment": {
+    "reference": "2S-RQ7YNM",
+    "type": "request",
+    "status": "created",
+    "fiatAmount": 15000,
+    "fiatCurrency": "NGN"
+  }
+}
+```
+
+**Step 2 — Payer fulfills with their chosen crypto**
+
+Rate locks here. Deposit address assigned. Payment moves to `pending`.
+
+```http
+POST /v1/payments/requests/2S-RQ7YNM/fulfill
+Content-Type: application/json
+
+{
+  "payer": {
+    "chatId": "7389201648"
+  },
+  "crypto": "USDT",
+  "network": "trc20"
+}
+```
+
+```json
+{
+  "success": true,
+  "message": "Request fulfilled successfully",
+  "payment": {
+    "id": 54,
+    "reference": "2S-RQ7YNM",
+    "status": "pending",
+    "depositAddress": "TQn8RE7rHWkDpAFGLamDj4R9bNHx2V3Kop",
+    "cryptoAmount": 9.5812,
+    "crypto": "USDT",
+    "network": "trc20",
+    "fiatAmount": 15000,
+    "fiatCurrency": "NGN",
+    "rate": 1620.5,
+    "chargeAmount": 500,
+    "expiresAt": "2026-04-01T15:30:00.000Z"
+  }
+}
+```
+
+**Step 3 — Payer sends crypto**
+
+> Send **9.5812 USDT (TRC20)** to `TQn8RE7rHWkDpAFGLamDj4R9bNHx2V3Kop`. Expires in 30 minutes.
+
+The deposit watcher detects the transaction automatically. Once confirmed, settlement fires and NGN is sent to the receiver's bank account. Poll `GET /v1/payments/2S-RQ7YNM` until status is `settled`.
 
 ## Documentation
 
