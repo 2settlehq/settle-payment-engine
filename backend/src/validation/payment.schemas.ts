@@ -115,8 +115,8 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
     ETH: ['ethereum'],
     BNB: ['bsc'],
     TRX: ['tron'],
-    USDT: ['ethereum', 'erc20', 'bsc', 'bep20', 'tron', 'trc20'],
-    USDC: ['ethereum', 'erc20', 'bsc', 'bep20'],
+    USDT: ['erc20', 'bep20', 'trc20'],
+    USDC: ['erc20', 'bep20'],
   };
 
   // Type-specific validation
