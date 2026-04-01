@@ -205,7 +205,153 @@ GET /v1/payments/2S-K4M9PX
 
 ### Gift (Two-Phase)
 
-> Documentation coming soon.
+A gift lets the sender pay crypto upfront without knowing the recipient's bank details. The recipient claims later by providing their account.
+
+#### Phase 1 — Sender creates the gift
+
+No receiver needed at creation. The sender gets a deposit address and shares the `reference` with the recipient.
+
+**Fiat-first** (recipient receives a specific NGN amount):
+
+```http
+POST /v1/payments
+X-API-Key: pk_xxxxx
+X-Timestamp: <unix ms>
+X-Signature: <hmac>
+Content-Type: application/json
+
+{
+  "type": "gift",
+  "fiatAmount": 20000,
+  "fiatCurrency": "NGN",
+  "crypto": "USDT",
+  "network": "trc20",
+  "payer": {
+    "chatId": "7389201648"
+  }
+}
+```
+
+**Crypto-first** (sender sends a fixed crypto amount):
+
+```http
+POST /v1/payments
+...
+
+{
+  "type": "gift",
+  "cryptoAmount": 12.5,
+  "fiatCurrency": "NGN",
+  "crypto": "USDT",
+  "network": "trc20",
+  "payer": {
+    "chatId": "7389201648"
+  }
+}
+```
+
+```json
+{
+  "success": true,
+  "payment": {
+    "id": 31,
+    "reference": "2S-GFT4XW",
+    "type": "gift",
+    "status": "pending",
+    "depositAddress": "TQn8RE7rHWkDpAFGLamDj4R9bNHx2V3Kop",
+    "cryptoAmount": 12.5,
+    "crypto": "USDT",
+    "network": "trc20",
+    "fiatAmount": 20000,
+    "fiatCurrency": "NGN",
+    "rate": 1620.5,
+    "chargeAmount": 500,
+    "expiresAt": "2026-04-01T14:00:00.000Z"
+  }
+}
+```
+
+Sender pays `cryptoAmount` to `depositAddress`, then shares `reference` (`2S-GFT4XW`) with the recipient.
+
+---
+
+#### Phase 2 — Recipient claims the gift
+
+The deposit must be confirmed on-chain before claiming. The claim flow mirrors the transfer verify-then-confirm pattern.
+
+**Step 1 — Find the recipient's bank code**
+
+```http
+GET /v1/banks/list?name=mon
+```
+
+```json
+{
+  "message": [
+    "1. MONEYTRUST MFB 090129",
+    "2. MONIEPOINT MICROFINANCE BANK 090405",
+    "3. Monarch Microfinance Bank 090462",
+    "4. Money Master PSB 120005"
+  ]
+}
+```
+
+**Step 2 — Verify the recipient's account**
+
+```http
+POST /v1/payments/verify-receiver
+Content-Type: application/json
+
+{
+  "bankCode": "090405",
+  "accountNumber": "8012345678"
+}
+```
+
+```json
+{
+  "success": true,
+  "receiver": {
+    "accountName": "JOHN DOE",
+    "accountNumber": "8012345678",
+    "bankName": "MONIEPOINT MICROFINANCE BANK",
+    "bankCode": "090405"
+  }
+}
+```
+
+Show `accountName` and `bankName` to the recipient for confirmation before proceeding.
+
+**Step 3 — Confirm the claim**
+
+```http
+POST /v1/payments/gifts/2S-GFT4XW/claim/confirm
+Content-Type: application/json
+
+{
+  "bankCode": "090405",
+  "accountNumber": "8012345678"
+}
+```
+
+```json
+{
+  "success": true,
+  "message": "Gift claimed successfully. Payout is being processed.",
+  "payment": {
+    "id": 31,
+    "reference": "2S-GFT4XW",
+    "status": "settling",
+    "receiver": {
+      "accountName": "JOHN DOE",
+      "accountNumber": "8012345678",
+      "bankName": "MONIEPOINT MICROFINANCE BANK"
+    }
+  }
+}
+```
+
+Settlement fires immediately. NGN is sent to the recipient's bank account. Poll `GET /v1/payments/2S-GFT4XW` until status is `settled`.
 
 ### Request (Two-Phase)
 
