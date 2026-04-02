@@ -97,7 +97,10 @@ function validateCreateInput(input: CreatePaymentInput): void {
     }
   }
 
-  // Crypto/network required for transfer and gift, optional for request (set at fulfillment)
+  // bank_confirmation: no payer/receiver required — bank manages its own users and fiat
+  // crypto + network are enforced by the generic check above (type !== 'request')
+
+  // Crypto/network required for transfer, gift, and bank_confirmation; optional for request
   if (input.type !== 'request') {
     if (!input.crypto) {
       throw new InvalidInputError('Crypto is required', 'crypto');
@@ -200,6 +203,7 @@ export class SessionManager {
         parentWallet: resolvedInput.parentWallet,
         expiresAt,
         metadata: resolvedInput.metadata,
+        bankRef: resolvedInput.bankRef,
       };
 
       return this.repository.create(sessionData);
@@ -216,7 +220,9 @@ export class SessionManager {
     const charges = calculateCharges(
       resolvedInput.fiatAmount!,
       resolvedInput.crypto!,
-      rateLock
+      rateLock,
+      undefined,
+      resolvedInput.chargeFrom ?? 'crypto'
     );
 
     // Try HD wallet first, fall back to legacy wallet pool
@@ -249,8 +255,9 @@ export class SessionManager {
       id: ids.id,
       reference: ids.reference,
       type: resolvedInput.type,
-      fiatAmount: resolvedInput.fiatAmount!, // guaranteed: either fiat-first or derived from cryptoAmount reverse-calc
+      fiatAmount: charges.netFiatAmount,
       fiatCurrency: resolvedInput.fiatCurrency,
+      transactionUsd: rateLock.rate ? charges.netFiatAmount / rateLock.rate : undefined,
       cryptoAmount: charges.totalCryptoAmount,
       crypto: resolvedInput.crypto,
       network: resolvedInput.network,
@@ -267,6 +274,7 @@ export class SessionManager {
       apiKeyId: resolvedInput.apiKeyId,
       expiresAt,
       metadata: resolvedInput.metadata,
+      bankRef: resolvedInput.bankRef,
     };
 
     const session = await this.repository.create(sessionData);
@@ -293,6 +301,7 @@ export class SessionManager {
         fundingWalletIndex: session.fundingWalletIndex,
         toAddress: session.parentWallet,
         expiresAt: session.expiresAt,
+        confirmationThresholds: resolvedInput.confirmationThresholds,
       });
     }
 
@@ -555,6 +564,7 @@ export class SessionManager {
       rate: rateLock.rate,
       assetPrice: rateLock.assetPrice,
       chargeAmount: charges.fiatCharge,
+      transactionUsd: rateLock.rate ? charges.netFiatAmount / rateLock.rate : undefined,
       depositAddress,
       walletId,
       derivationIndex,

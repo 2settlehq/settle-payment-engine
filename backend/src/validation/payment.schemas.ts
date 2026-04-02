@@ -11,7 +11,7 @@ import { z } from 'zod';
 // CONSTANTS
 // =============================================================================
 
-const PAYMENT_TYPES = ['transfer', 'gift', 'request', 'merchant'] as const;
+const PAYMENT_TYPES = ['transfer', 'gift', 'request', 'merchant', 'bank_confirmation'] as const;
 const FIAT_CURRENCIES = ['NGN', 'GHS', 'KES', 'ZAR'] as const;
 const CRYPTO_CURRENCIES = ['BTC', 'ETH', 'BNB', 'TRX', 'USDT', 'USDC'] as const;
 const NETWORKS = [
@@ -66,6 +66,14 @@ const basePaymentSchema = z.object({
   merchantReference: z.string().optional(),
   callbackUrl: z.string().url().optional(),
   metadata: z.record(z.unknown()).optional(),
+  /** Bank's own internal transaction reference (bank_confirmation type only) */
+  bankRef: z.string().max(100).optional(),
+  /**
+   * Transfer only. Controls which side bears the platform fee.
+   * 'fiat'   — charge deducted from fiat payout; receiver gets fiatAmount - charge.
+   * 'crypto' — charge added to crypto; receiver gets full fiatAmount.
+   */
+  chargeFrom: z.enum(['fiat', 'crypto']).optional(),
 });
 
 /** Create payment schema with type-specific validation */
@@ -75,7 +83,7 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
   const hasCrypto = data.cryptoAmount !== undefined;
 
   // Requests are fiat-only — cryptoAmount is never valid
-  if (data.type === 'request' && hasCrypto) {
+  if ((data.type === 'request') && hasCrypto) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'cryptoAmount is not valid for request type — use fiatAmount instead',
@@ -92,7 +100,7 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
   }
 
   // Crypto-first path: fiatAmount absent, cryptoAmount present (not applicable to requests)
-  if (!hasFiat && hasCrypto && data.type !== 'request') {
+  if (!hasFiat && hasCrypto && data.type !== 'request' && data.type !== 'bank_confirmation') {
     if (!data.crypto) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -142,11 +150,28 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
 
     case 'request':
       // Crypto and network are optional for requests (set at fulfillment)
-      // No validation needed here
       break;
 
     case 'merchant':
-      // Merchant payments may have different requirements
+      break;
+
+    case 'bank_confirmation':
+      // Crypto and network are required — bank knows what the customer is sending
+      if (!data.crypto) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Crypto is required for bank confirmation payments',
+          path: ['crypto'],
+        });
+      }
+      if (!data.network) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Network is required for bank confirmation payments',
+          path: ['network'],
+        });
+      }
+      // Payer and receiver are not required — bank manages its own users and fiat disbursement
       break;
   }
 
@@ -161,7 +186,7 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
     }
   }
 
-  // Type-specific participant validation
+  // Type-specific participant + chargeFrom validation
   switch (data.type) {
     case 'transfer':
       if (!data.payer) {
@@ -178,6 +203,13 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
           path: ['receiver'],
         });
       }
+      if (!data.chargeFrom) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "chargeFrom is required for transfers — specify 'fiat' or 'crypto'",
+          path: ['chargeFrom'],
+        });
+      }
       break;
 
     case 'gift':
@@ -188,7 +220,20 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
           path: ['payer'],
         });
       }
-      // Receiver is optional - set when gift is claimed
+      if (data.receiver) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Receiver cannot be set when creating a gift — it is provided when the gift is claimed',
+          path: ['receiver'],
+        });
+      }
+      if (data.chargeFrom) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'chargeFrom is not valid for gifts — charge is always added to the crypto amount',
+          path: ['chargeFrom'],
+        });
+      }
       break;
 
     case 'request':
@@ -199,12 +244,27 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
           path: ['receiver'],
         });
       }
-      // Payer is optional - set when request is fulfilled
-      // Crypto/network optional - set when request is fulfilled
+      if (data.payer) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Payer cannot be set when creating a request — it is provided when the request is fulfilled',
+          path: ['payer'],
+        });
+      }
+      if (data.chargeFrom) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'chargeFrom is not valid for requests — charge is always added to the crypto amount',
+          path: ['chargeFrom'],
+        });
+      }
       break;
 
     case 'merchant':
-      // Merchant payments may have different requirements
+      break;
+
+    case 'bank_confirmation':
+      // No payer or receiver required — bank handles user identity and fiat disbursement
       break;
   }
 });

@@ -8,7 +8,7 @@
 // ENUMS
 // =============================================================================
 
-export type PaymentType = 'transfer' | 'gift' | 'request' | 'merchant';
+export type PaymentType = 'transfer' | 'gift' | 'request' | 'merchant' | 'bank_confirmation';
 
 export type PaymentStatus =
   | 'created'
@@ -80,10 +80,20 @@ export interface CreatePaymentInput {
   merchantReference?: string;
   callbackUrl?: string;
   metadata?: Record<string, unknown>;
+  /** Bank's own internal transaction reference (bank_confirmation type only) */
+  bankRef?: string;
+  /**
+   * Transfer only. Controls which side bears the platform fee.
+   * 'fiat'   — charge deducted from fiat payout; receiver gets fiatAmount - charge.
+   * 'crypto' — charge added to crypto; receiver gets full fiatAmount.
+   */
+  chargeFrom?: 'fiat' | 'crypto';
   // Populated from API key at request time
   apiKeyId?: number;
   fundingWalletIndex?: number;
   parentWallet?: string; // Chain-specific parent wallet address for sweep destination
+  /** Per-key confirmation threshold overrides — populated from api_keys.confirmation_thresholds */
+  confirmationThresholds?: Partial<Record<string, number>>;
 }
 
 // =============================================================================
@@ -107,6 +117,8 @@ export interface PaymentSession {
   status: PaymentStatus;
   fiatAmount: number;
   fiatCurrency: FiatCurrency;
+  /** USD value of the transaction at rate-lock time (netFiatAmount / rate). Persisted for analytics. */
+  transactionUsd?: number;
   cryptoAmount?: number; // Optional for request type (set at fulfillment)
   crypto?: CryptoCurrency; // Optional for request type (set at fulfillment)
   network?: Network; // Optional for request type (set at fulfillment)
@@ -131,6 +143,8 @@ export interface PaymentSession {
   confirmedAt?: Date;
   settledAt?: Date;
   metadata?: Record<string, unknown>;
+  /** Bank's own internal transaction reference (bank_confirmation type only) */
+  bankRef?: string;
 }
 
 // =============================================================================

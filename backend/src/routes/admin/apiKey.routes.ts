@@ -19,6 +19,15 @@ const router = Router();
 // VALIDATION SCHEMAS
 // =============================================================================
 
+const confirmationThresholdsSchema = z
+  .record(z.number().int().positive())
+  .refine(
+    (val) => Object.keys(val).every((k) => ['bitcoin', 'ethereum', 'bsc', 'tron'].includes(k)),
+    { message: 'confirmationThresholds keys must be: bitcoin, ethereum, bsc, or tron' }
+  )
+  .nullable()
+  .optional();
+
 const createApiKeySchema = z.object({
   merchantId: z.string().min(1).max(50),
   name: z.string().min(1).max(100),
@@ -26,6 +35,8 @@ const createApiKeySchema = z.object({
   rateLimitTier: z.enum(['standard', 'premium', 'unlimited']).optional(),
   ipWhitelist: z.array(z.string()).optional(),
   expiresAt: z.string().datetime().optional().transform(val => val ? new Date(val) : undefined),
+  settlementMode: z.enum(['mongoro', 'paystack', 'self']).optional(),
+  confirmationThresholds: confirmationThresholdsSchema,
 });
 
 const updateApiKeySchema = z.object({
@@ -36,6 +47,7 @@ const updateApiKeySchema = z.object({
   webhookUrl: z.string().url().nullable().optional(),
   sweepAddress: z.string().nullable().optional(),
   settlementMode: z.enum(['mongoro', 'paystack', 'self']).optional(),
+  confirmationThresholds: confirmationThresholdsSchema,
 });
 
 // =============================================================================
@@ -74,7 +86,10 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       });
     }
 
-    const result = await createApiKey(parsed.data);
+    const result = await createApiKey({
+      ...parsed.data,
+      confirmationThresholds: parsed.data.confirmationThresholds ?? undefined,
+    });
 
     return res.status(201).json({
       status: true,
@@ -122,7 +137,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           isActive: Boolean(row.is_active), expiresAt: row.expires_at,
           createdAt: row.created_at, lastUsedAt: row.last_used_at,
           webhookUrl: row.webhook_url, sweepAddress: row.sweep_address,
-          settlementMode: row.settlement_mode ?? 'self',
+          settlementMode: row.settlement_mode ?? 'paystack',
           fundingWalletIndex: row.funding_wallet_index ?? null,
           fundingWalletBitcoin: row.funding_wallet_bitcoin ?? null,
           fundingWalletEthereum: row.funding_wallet_ethereum ?? null,
@@ -215,6 +230,7 @@ router.patch('/:keyId', async (req: Request, res: Response, next: NextFunction) 
       webhookUrl: parsed.data.webhookUrl,
       sweepAddress: parsed.data.sweepAddress,
       settlementMode: parsed.data.settlementMode,
+      confirmationThresholds: parsed.data.confirmationThresholds,
     });
 
     if (!updated) {
