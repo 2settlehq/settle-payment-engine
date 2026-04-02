@@ -11,6 +11,7 @@ import paymentRoutes from './payment.routes';
 import walletRoutes from './wallet.routes';
 import authRoutes from './auth.routes';
 import meRoutes from './me.routes';
+import historyRoutes from './history.routes';
 import webhookRoutes from './webhook.routes';
 import {
   deprecateTransferRoutes,
@@ -57,5 +58,8 @@ router.use('/auth', authRoutes);
 
 // Me routes (HMAC-authenticated, user-scoped)
 router.use('/me', meRoutes);
+
+// Unified transaction history (legacy + payment engine)
+router.use('/history', historyRoutes);
 
 export default router;
