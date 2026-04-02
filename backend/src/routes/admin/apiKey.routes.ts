@@ -137,7 +137,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           isActive: Boolean(row.is_active), expiresAt: row.expires_at,
           createdAt: row.created_at, lastUsedAt: row.last_used_at,
           webhookUrl: row.webhook_url, sweepAddress: row.sweep_address,
-          settlementMode: row.settlement_mode ?? 'self',
+          settlementMode: row.settlement_mode ?? 'paystack',
           fundingWalletIndex: row.funding_wallet_index ?? null,
           fundingWalletBitcoin: row.funding_wallet_bitcoin ?? null,
           fundingWalletEthereum: row.funding_wallet_ethereum ?? null,

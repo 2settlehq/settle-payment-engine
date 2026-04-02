@@ -6,6 +6,7 @@
  */
 
 import crypto from 'crypto';
+import axios from 'axios';
 import config from '../../../config';
 import { pool } from '../../../lib/mysql';
 import { MongoroService, mongoroService } from './mongoro.service';
@@ -165,20 +166,22 @@ export class SettlementService {
         }
       }
 
-      // 5b. Paystack mode — initiate transfer
+      // 5b. Paystack mode — resolve the correct Paystack bank code (lazy fetch + cache)
+      const paystackBankCode = await this.resolvePaystackBankCode(receiver.bankCode, receiver.bankName);
+
       const attemptId = await this.createSettlementAttempt({
         sessionId,
         provider: 'paystack',
         status: 'pending',
         amount: session.fiat_amount,
         accountNumber: receiver.accountNumber,
-        bankCode: receiver.bankCode,
+        bankCode: paystackBankCode,
         accountName: receiver.accountName,
       });
 
       const response = await this.paystack.transfer(
         receiver.accountNumber,
-        receiver.bankCode,
+        paystackBankCode,
         receiver.accountName,
         session.fiat_amount,
         narration,
@@ -360,7 +363,7 @@ export class SettlementService {
       console.log(`[Settlement] Telegram alert sent for ${session.reference}, awaiting manual settlement`);
     } else {
       // Both Mongoro AND Telegram failed - mark as failed
-      console.error(`[Settlement] Both Mongoro and Telegram failed for ${session.reference}, marking as failed`);
+      console.error(`[Settlement] Settlement and Telegram alert both failed for ${session.reference}, marking as failed`);
       await this.updateSessionStatus(session.id, 'failed');
       sendPaymentWebhook(session.id, 'payment.failed').catch(() => {});
     }
@@ -577,12 +580,12 @@ export class SettlementService {
   // =============================================================================
 
   private async getSettlementMode(apiKeyId: number | null | undefined): Promise<'mongoro' | 'paystack' | 'self'> {
-    if (!apiKeyId) return 'mongoro';
+    if (!apiKeyId) return 'paystack';
     try {
       const apiKey = await getApiKeyById(apiKeyId);
-      return apiKey?.settlementMode ?? 'mongoro';
+      return apiKey?.settlementMode ?? 'paystack';
     } catch {
-      return 'mongoro';
+      return 'paystack';
     }
   }
 
@@ -618,7 +621,8 @@ export class SettlementService {
     if (!receiverId) return null;
 
     const [rows] = await pool.execute<ReceiverRow[]>(
-      `SELECT id, bank_code, bank_account AS account_number, account_name, bank_name, paystack_recipient_code
+      `SELECT id, bank_code, bank_account AS account_number, account_name, bank_name,
+              paystack_recipient_code
        FROM receivers WHERE id = ?`,
       [receiverId]
     );
@@ -633,6 +637,91 @@ export class SettlementService {
       bankName: row.bank_name,
       paystackRecipientCode: row.paystack_recipient_code ?? undefined,
     };
+  }
+
+  /**
+   * Resolve the correct Paystack bank code for a CBN bank code.
+   * Checks the banks table cache first; if missing, fetches from Paystack API and caches it.
+   */
+  private async resolvePaystackBankCode(cbnCode: string, bankName?: string): Promise<string> {
+    // 1. Check cache
+    const [cached] = await pool.execute<RowDataPacket[]>(
+      'SELECT paystack_code FROM banks WHERE code = ? AND paystack_code IS NOT NULL LIMIT 1',
+      [cbnCode]
+    );
+    if ((cached as any)[0]?.paystack_code) {
+      return (cached as any)[0].paystack_code;
+    }
+
+    // 2. Fetch from Paystack API
+    const secretKey = config.settlement.paystack.secretKey;
+    if (!secretKey) {
+      console.warn(`[Settlement] PAYSTACK_SECRET_KEY not set — using CBN code ${cbnCode} as fallback`);
+      return cbnCode;
+    }
+
+    try {
+      const res = await axios.get<{ status: boolean; data: Array<{ name: string; code: string }> }>(
+        'https://api.paystack.co/bank?country=nigeria&perPage=100',
+        { headers: { Authorization: `Bearer ${secretKey}` }, timeout: 10000 }
+      );
+      const banks = res.data?.data ?? [];
+
+      // Try exact code match first (some banks share CBN and Paystack codes)
+      const exact = banks.find(b => b.code === cbnCode);
+      if (exact) {
+        await this.cachePaystackBankCode(cbnCode, exact.code);
+        return exact.code;
+      }
+
+      // Fuzzy name match
+      if (bankName) {
+        const match = this.fuzzyFindBank(bankName, banks);
+        if (match) {
+          console.log(`[Settlement] Resolved ${cbnCode} "${bankName}" → Paystack code ${match.code} "${match.name}"`);
+          await this.cachePaystackBankCode(cbnCode, match.code);
+          return match.code;
+        }
+      }
+
+      console.warn(`[Settlement] Could not match CBN code ${cbnCode} ("${bankName}") to a Paystack bank — using CBN code as fallback`);
+    } catch (err: any) {
+      console.error(`[Settlement] Paystack bank list fetch failed for ${cbnCode}:`, err.message);
+    }
+
+    return cbnCode; // fallback — Paystack will reject if wrong, but we log it above
+  }
+
+  private async cachePaystackBankCode(cbnCode: string, paystackCode: string): Promise<void> {
+    await pool.execute('UPDATE banks SET paystack_code = ? WHERE code = ?', [paystackCode, cbnCode]);
+    console.log(`[Settlement] Cached Paystack code for CBN ${cbnCode} → ${paystackCode}`);
+  }
+
+  private fuzzyFindBank(
+    name: string,
+    banks: Array<{ name: string; code: string }>
+  ): { name: string; code: string } | null {
+    const normalize = (s: string) =>
+      s.toLowerCase()
+       .replace(/\b(bank|microfinance|mfb|mfbank|finance|limited|ltd|plc|nigeria|nigerian)\b/g, '')
+       .replace(/[^a-z0-9 ]/g, '')
+       .replace(/\s+/g, ' ')
+       .trim();
+
+    const target = normalize(name);
+    let best: { name: string; code: string } | null = null;
+    let bestScore = 0.5; // minimum to accept
+
+    for (const b of banks) {
+      const wa = new Set(target.split(' ').filter(Boolean));
+      const wb = new Set(normalize(b.name).split(' ').filter(Boolean));
+      if (!wa.size || !wb.size) continue;
+      let matches = 0;
+      for (const w of wa) if (wb.has(w)) matches++;
+      const score = matches / Math.max(wa.size, wb.size);
+      if (score > bestScore) { bestScore = score; best = b; }
+    }
+    return best;
   }
 
   private async updateSessionStatus(sessionId: string, status: string): Promise<void> {
