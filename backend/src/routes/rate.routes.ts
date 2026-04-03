@@ -145,7 +145,7 @@ router.get("/limits", async (req: Request, res: Response, next: NextFunction) =>
     const assetPrice = await getAssetPrice(crypto as any);
 
     // --- Fixed NGN bounds ---
-    const MIN_NGN = 20_000;
+    const MIN_NGN = 1;
     const MAX_NGN = 2_000_000;
 
     let min: number;
