@@ -65,12 +65,22 @@ router.post(
     // Resolve receiver via NUBAN before creating session (if provided).
     // bankCode comes from the client (via GET /banks/list or POST /verify-receiver).
     // bankName and accountName are always resolved server-side — never trusted from client.
+    // Sandbox keys skip real NUBAN verification — use placeholder values.
     let resolvedReceiver: { bankCode: string; accountNumber: string; accountName: string; bankName: string } | undefined;
     if (input.receiver) {
-      resolvedReceiver = await bankService.resolveAccount(
-        input.receiver.bankCode,
-        input.receiver.accountNumber
-      );
+      if (apiKey?.isSandbox) {
+        resolvedReceiver = {
+          bankCode: input.receiver.bankCode,
+          accountNumber: input.receiver.accountNumber,
+          accountName: 'Sandbox Account',
+          bankName: 'Sandbox Bank',
+        };
+      } else {
+        resolvedReceiver = await bankService.resolveAccount(
+          input.receiver.bankCode,
+          input.receiver.accountNumber
+        );
+      }
     }
 
     // Create payment session via PaymentEngine
@@ -102,6 +112,7 @@ router.post(
       fundingWalletIndex: apiKey?.fundingWalletIndex ?? undefined,
       parentWallet,
       confirmationThresholds: apiKey?.confirmationThresholds ?? undefined,
+      isSandbox: apiKey?.isSandbox ?? false,
     });
 
     // Link participants if provided
