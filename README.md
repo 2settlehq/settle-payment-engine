@@ -4,13 +4,15 @@ A standalone crypto-to-fiat payment engine that enables banks, fintechs, and mer
 
 ## Transaction Types
 
-The payment engine supports three core transaction types:
+The payment engine supports five transaction types:
 
 | Type | Description | Phases |
 |------|-------------|--------|
 | **Transfer** | Direct crypto-to-bank payment | Single phase: pay crypto, receive fiat |
 | **Gift** | Send crypto as a claimable gift | Two phases: create gift, claim gift |
 | **Request** | Request payment from someone | Two phases: create request, pay request |
+| **Merchant** | Hosted checkout for e-commerce | Single phase: customer pays, merchant gets fiat |
+| **Bank Confirmation** | Bank-managed crypto confirmation rail | Bank handles user identity & fiat disbursement |
 
 ## Quick Start
 

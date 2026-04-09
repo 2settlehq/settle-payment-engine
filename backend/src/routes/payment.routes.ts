@@ -5,6 +5,7 @@
  * These will replace the legacy transfer/gift/request routes.
  */
 
+import crypto from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
 import { paymentEngine } from '../services/payment-engine';
 import { participantService } from '../services/payment-engine/participant';
@@ -19,6 +20,8 @@ import { PaymentEngineError } from '../services/payment-engine/errors';
 import { requirePermission } from '../security/middleware/authenticate';
 import { settlementService } from '../services/payment-engine/settlement/settlement.service';
 import { bankService } from '../services/bank/bank.service';
+import { sessionManager } from '../services/payment-engine/session/session-manager';
+import { sendPaymentWebhook } from '../services/payment-engine/payment-webhook.service';
 
 const router = Router();
 
@@ -129,6 +132,46 @@ router.post(
         bankName: resolvedReceiver.bankName,
       } as any);
       await paymentEngine.setReceiverId(session.id, receiverId);
+    }
+
+    // Auto-settle: record the payment as settled immediately.
+    if (input.autoSettle && session.status === 'pending') {
+      if (apiKey?.isSandbox) {
+        // Sandbox: simulate the full lifecycle through the state machine
+        if (session.cryptoAmount) {
+          const fakeTxHash = `sandbox_${crypto.randomBytes(16).toString('hex')}`;
+          await sessionManager.markDeposit(session.id, fakeTxHash, session.cryptoAmount);
+          sendPaymentWebhook(session.id, 'payment.confirming').catch(() => {});
+          await sessionManager.confirmDeposit(session.id, 1);
+          sendPaymentWebhook(session.id, 'payment.confirmed').catch(() => {});
+          await settlementService.settleSession(session.id);
+        }
+      } else {
+        // Live key: direct record — no state machine, no real settlement call.
+        // Use this to record manual/external transfers that have already been settled.
+        const { pool } = await import('../lib/mysql');
+        const now = new Date();
+        await pool.query(
+          `UPDATE payment_sessions
+           SET status = 'settled',
+               tx_hash = ?,
+               settlement_reference = ?,
+               settlement_provider = 'manual',
+               confirmed_at = ?,
+               settled_at = ?,
+               updated_at = ?
+           WHERE id = ?`,
+          [
+            input.txHash ?? null,
+            input.settlementReference ?? null,
+            now,
+            now,
+            now,
+            session.id,
+          ]
+        );
+        sendPaymentWebhook(session.id, 'payment.settled').catch(() => {});
+      }
     }
 
     // Sync to legacy tables

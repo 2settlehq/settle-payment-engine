@@ -10,6 +10,7 @@ A standalone Express API for crypto-to-fiat payment processing. Supports transfe
 - [Authentication](#authentication)
 - [Settlement Modes](#settlement-modes)
 - [Payment Flows](#payment-flows)
+- [Sandbox Mode](#sandbox-mode)
 - [Wallet-as-a-Service (WaaS)](#wallet-as-a-service-waas)
 - [HD Wallet Setup](#hd-wallet-setup)
 - [Database Setup](#database-setup)
@@ -187,6 +188,12 @@ HMAC_TIMESTAMP_TOLERANCE_MS=300000
 | POST | `/v1/payments/requests/:reference/fulfill` | Public | Fulfill a request (provide payer + crypto) |
 | POST | `/v1/payments/:reference/settle` | `payment:create` | Confirm self-settlement (requires `settlementToken`) |
 
+### Sandbox Endpoints (Sandbox API Keys Only)
+
+| Method | Endpoint | Permission | Description |
+|--------|----------|------------|-------------|
+| POST | `/v1/sandbox/payments/:reference/simulate-deposit` | `payment:create` | Simulate a crypto deposit for a sandbox payment, running through the full lifecycle |
+
 ### Me Endpoints (HMAC Auth — own key only)
 
 | Method | Endpoint | Description |
@@ -309,13 +316,14 @@ Authorization: Bearer <ADMIN_SECRET>
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `keyId` | string | Public key (`pk_xxxxx`) |
+| `keyId` | string | Public key (`pk_live_xxx` or `pk_test_xxx` for sandbox) |
 | `merchantId` | string | Associated merchant |
 | `permissions` | string[] | e.g. `['payment:create', 'wallet:read']`. Use `['*']` for full access. Empty array = no access. |
 | `rateLimitTier` | `standard` \| `premium` \| `unlimited` | Rate limit bucket |
 | `ipWhitelist` | string[] \| null | CIDR ranges allowed to use this key |
 | `settlementMode` | `mongoro` \| `paystack` \| `self` | How fiat is disbursed for this key's payments (default: `paystack`) |
 | `confirmationThresholds` | object \| null | Per-chain confirmation overrides e.g. `{"bitcoin":6,"tron":30}`. Falls back to global defaults if null. |
+| `isSandbox` | boolean | When `true`, key uses `pk_test_/sk_test_` prefixes; watcher skipped; settlement short-circuits; `/v1/sandbox/*` endpoints enabled. Default: `false`. |
 | `parentWalletBitcoin` | string \| null | BTC sweep destination |
 | `parentWalletEthereum` | string \| null | ETH/BSC sweep destination |
 | `parentWalletTron` | string \| null | TRX sweep destination |
@@ -515,6 +523,32 @@ POST /v1/payments
 ```
 
 > `accountName` and `bankName` are never sent by the client — they are resolved server-side via NUBAN every time.
+
+**Optional: Record an already-settled transfer (live keys only)**
+
+Pass `autoSettle: true` to record a manually-completed transfer directly as `settled`, bypassing the deposit/confirmation lifecycle. This is for cases where you have already sent crypto and disbursed fiat externally and just need a record in the system.
+
+```json
+POST /v1/payments
+{
+  "type": "transfer",
+  "fiatAmount": 10000,
+  "fiatCurrency": "NGN",
+  "crypto": "USDT",
+  "network": "trc20",
+  "chargeFrom": "fiat",
+  "payer": { "chatId": "123456789" },
+  "receiver": { "bankCode": "058", "accountNumber": "0123456789" },
+  "autoSettle": true,
+  "txHash": "abc123...",
+  "settlementReference": "your-internal-ref"
+}
+```
+
+- `txHash` — the real blockchain transaction hash (optional but recommended)
+- `settlementReference` — your internal disbursement/settlement reference (optional)
+- No deposit address is watched; no fiat transfer is initiated — the session is inserted directly as `settled`
+- On sandbox keys, `autoSettle` instead simulates the full lifecycle (pending → confirming → confirmed → settled)
 
 Response:
 ```json
@@ -763,6 +797,80 @@ Session moves to `settled`.
 
 ---
 
+## Sandbox Mode
+
+Sandbox keys let you build and test integrations without real crypto or real fiat payouts.
+
+### Key Differences vs Live Keys
+
+| Behaviour | Sandbox key | Live key |
+|-----------|-------------|----------|
+| Key prefix | `pk_test_` / `sk_test_` | `pk_live_` / `sk_live_` |
+| Deposit watcher | Skipped — no on-chain monitoring | Active |
+| Settlement | Short-circuits to `settled` instantly | Paystack / Mongoro / self |
+| NUBAN lookup | Returns placeholder `Sandbox Account` | Real NUBAN API call |
+| `/v1/sandbox/*` endpoints | Enabled | 403 Forbidden |
+| `autoSettle: true` | Simulates full lifecycle (pending → settled) | Records directly as `settled` |
+
+### Create a Sandbox API Key
+
+```json
+POST /v1/admin/api-keys
+Authorization: Bearer <ADMIN_SECRET>
+
+{
+  "merchantId": "test-merchant",
+  "name": "My Sandbox Key",
+  "isSandbox": true,
+  "tier": "standard",
+  "settlementMode": "paystack"
+}
+```
+
+The response includes `publicKey` (`pk_test_...`) and `secretKey` (`sk_test_...`). Use these exactly like a live key for all HMAC-authenticated requests.
+
+### Simulate a Deposit
+
+After creating a payment with a sandbox key, use the simulate-deposit endpoint to run it through the lifecycle without sending real crypto:
+
+```json
+POST /v1/sandbox/payments/2S-XXXXXX/simulate-deposit
+{
+  "amount": 50.5,
+  "steps": "settled"
+}
+```
+
+**Body fields (all optional):**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `amount` | number | session's `cryptoAmount` | Override the received amount — useful for underpayment tests |
+| `steps` | `"confirming"` \| `"confirmed"` \| `"settled"` | `"settled"` | Stop at a specific lifecycle stage |
+
+**Steps:**
+- `"confirming"` — stops after `pending → confirming` (deposit detected)
+- `"confirmed"` — stops after `confirming → confirmed` (blockchain confirmations done)
+- `"settled"` — runs to completion: `confirmed → settling → settled`
+
+**Response:**
+```json
+{
+  "status": true,
+  "message": "Deposit simulated — payment settled",
+  "data": {
+    "reference": "2S-XXXXXX",
+    "status": "settled",
+    "txHash": "sandbox_a3f1...",
+    "receivedAmount": 50.5
+  }
+}
+```
+
+Webhooks fire at each step exactly as they would for a real payment (`payment.confirming`, `payment.confirmed`, `payment.settling`, `payment.settled`).
+
+---
+
 ## Wallet-as-a-Service (WaaS)
 
 Provision unique HD-derived deposit addresses for external platforms to monitor on-chain deposits independently.
@@ -874,6 +982,12 @@ SOURCE src/security/migrations/007_bank_confirmation.sql;
 
 -- Change default settlement mode to paystack
 SOURCE src/security/migrations/008_settlement_mode_paystack_default.sql;
+
+-- Sandbox flag on api_keys
+SOURCE src/security/migrations/009_add_sandbox_flag.sql;
+
+-- Sandbox flag on payment_sessions
+SOURCE src/services/payment-engine/migrations/007_add_sandbox_to_sessions.sql;
 ```
 
 ### Core Tables
@@ -933,7 +1047,7 @@ Authorization: Bearer <ADMIN_SECRET>
 Content-Type: application/json
 ```
 
-Body:
+Body (live key):
 ```json
 {
   "merchantId": "test-merchant",
@@ -943,7 +1057,17 @@ Body:
 }
 ```
 
-**Save the `publicKey` and `secretKey`!**
+Body (sandbox key — for development/testing):
+```json
+{
+  "merchantId": "test-merchant",
+  "name": "Sandbox Key",
+  "tier": "standard",
+  "isSandbox": true
+}
+```
+
+**Save the `publicKey` and `secretKey`!** Sandbox keys have `pk_test_/sk_test_` prefixes.
 
 ### 4. Set Up Postman Environment
 
@@ -1065,6 +1189,60 @@ POST {{baseUrl}}/payments/2S-XXXXXX/settle
 }
 ```
 
+### 7. Test Sandbox (Sandbox Keys Only)
+
+**Create a sandbox API key:**
+```json
+POST {{adminUrl}}/admin/api-keys
+Authorization: Bearer <ADMIN_SECRET>
+
+{
+  "merchantId": "test-merchant",
+  "name": "Sandbox Key",
+  "isSandbox": true,
+  "tier": "standard"
+}
+```
+
+**Create a payment with sandbox key (NUBAN verification is skipped — any account number works):**
+```json
+POST {{baseUrl}}/payments
+{
+  "type": "transfer",
+  "fiatAmount": 5000,
+  "fiatCurrency": "NGN",
+  "crypto": "USDT",
+  "network": "trc20",
+  "chargeFrom": "fiat",
+  "payer": { "chatId": "test-user-1" },
+  "receiver": { "bankCode": "058", "accountNumber": "0000000000" }
+}
+```
+
+**Simulate deposit to run it to settled:**
+```json
+POST {{baseUrl}}/sandbox/payments/2S-XXXXXX/simulate-deposit
+{
+  "steps": "settled"
+}
+```
+
+**Or create and settle in one step with autoSettle:**
+```json
+POST {{baseUrl}}/payments
+{
+  "type": "transfer",
+  "fiatAmount": 5000,
+  "fiatCurrency": "NGN",
+  "crypto": "USDT",
+  "network": "trc20",
+  "chargeFrom": "fiat",
+  "payer": { "chatId": "test-user-1" },
+  "receiver": { "bankCode": "058", "accountNumber": "0000000000" },
+  "autoSettle": true
+}
+```
+
 ---
 
 ## Deposit Watcher
@@ -1108,6 +1286,7 @@ src/
 ├── routes/
 │   ├── index.ts                      # Route aggregator
 │   ├── payment.routes.ts             # Unified /payments routes
+│   ├── sandbox.routes.ts             # /sandbox/* — simulate-deposit (sandbox keys only)
 │   ├── me.routes.ts                  # /me/* — own key data
 │   ├── wallet.routes.ts              # /wallets — WaaS
 │   ├── webhook.routes.ts             # /webhooks/mongoro, /webhooks/paystack
