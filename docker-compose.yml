@@ -89,6 +89,31 @@ services:
       retries: 3
       start_period: 10s
 
+  rate-updater:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: payment-rate-updater
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=${DB_HOST:-mysql}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER:-root}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME:-2settle_db}
+      - RATE_ROW_ID=${RATE_ROW_ID:-1}
+    command: >
+      /bin/sh -c "mkdir -p /app/logs &&
+      while true; do
+        node dist/scripts/run-rate-update.js >> /app/logs/rate-update.log 2>&1;
+        sleep 1200;
+      done"
+    volumes:
+      - ./backend/logs:/app/logs
+    networks:
+      - payment-network
+
 
 # Networks & Volumes
 networks:
