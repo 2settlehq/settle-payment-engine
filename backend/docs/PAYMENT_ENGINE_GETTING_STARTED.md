@@ -1348,10 +1348,10 @@ Payments cannot be cancelled once crypto is sent. Before deposit, simply let the
 
 ## Support
 
-- **API Status:** https://status.example.com
-- **Documentation:** https://docs.example.com
-- **Email:** support@example.com
+- **API Status:** https://api.2settle.io/v1/health
+- **Documentation:** https://docs.api.2settle.io
+- **Email:** sirfitech@gmail.com
 
 ---
 
-*Last updated: March 2024*
+*Last updated: May 2026*
