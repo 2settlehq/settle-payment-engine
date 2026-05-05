@@ -4,9 +4,13 @@
   "description": "2Settle Payment Engine - Standalone Express API",
   "main": "dist/index.js",
   "scripts": {
+    "copy:missing-settled-payment-sessions": "node scripts/copy-missing-settled-payment-sessions.js",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
+    "generate:gift-ids": "node scripts/generate-gift-ids.js",
     "start": "node dist/index.js",
+    "copy:missing-successful-summaries": "node scripts/copy-missing-successful-summaries.js",
+    "sync:summaries-status": "node scripts/sync-summaries-status.js",
     "lint": "eslint src --ext .ts",
     "test": "vitest",
     "test:run": "vitest run",
