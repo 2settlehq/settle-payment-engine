@@ -447,8 +447,8 @@ export class HDWalletService {
       }
 
       // Tron: derive address from public key
-      const { secp256k1 } = require('@noble/curves/secp256k1');
-      const { keccak_256 } = require('@noble/hashes/sha3');
+      const { secp256k1 } = require('@noble/curves/secp256k1.js');
+      const { keccak_256 } = require('@noble/hashes/sha3.js');
       const { createHash } = require('crypto');
 
       const privKey = derived.privateKey;

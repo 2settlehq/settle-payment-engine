@@ -127,6 +127,8 @@ export interface SweeperConfig {
 // =============================================================================
 
 /** Verified token contracts for sweeping */
+
+// we have to verify the contracts of the native tokens
 export const SWEEP_TOKEN_CONTRACTS: Record<Network, Record<string, string>> = {
   ethereum: {
     USDT: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
