@@ -390,6 +390,20 @@ export class SessionManager {
     });
   }
 
+  async updateConfirmations(id: string, confirmations: number): Promise<PaymentSession> {
+    const session = await this.getSession(id);
+
+    if (session.status !== 'confirming') {
+      throw new InvalidSessionStateError(
+        session.status,
+        'update confirmations',
+        ['confirming']
+      );
+    }
+
+    return this.repository.update(id, { confirmations });
+  }
+
   async markSettling(id: string): Promise<PaymentSession> {
     return this.updateStatus(id, 'settling');
   }

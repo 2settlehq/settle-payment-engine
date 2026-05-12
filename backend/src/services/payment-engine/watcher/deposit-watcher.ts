@@ -6,7 +6,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { sessionManager } from '../session';
+import { sessionManager, sessionRepository } from '../session';
 import { Network, CryptoCurrency, HDChain } from '../types';
 import { getSweeperService } from '../sweeper';
 import {
@@ -33,7 +33,7 @@ import {
 import { getProcessedTxStore } from './state';
 import * as walletService from '../../wallet-api/wallet.service';
 import { sendWebhook } from '../../wallet-api/webhook.service';
-import { getWebhookConfig } from '../../../security/services/apiKey.service';
+import { getApiKeyById, getWebhookConfig } from '../../../security/services/apiKey.service';
 import { sendPaymentWebhook } from '../payment-webhook.service';
 import { settlementService } from '../settlement/settlement.service';
 
@@ -117,6 +117,10 @@ export class DepositWatcher extends EventEmitter {
     // Load existing HDWaaS wallets that need watching
     await this.loadExistingWallets();
 
+    // Resume payment sessions that were in-flight before a restart.
+    await this.loadExistingSessions();
+    await this.resumeConfirmedSettlements();
+
     console.log('[DepositWatcher] Waiting for sessions to watch...');
 
     // Start cleanup timer to remove expired sessions
@@ -150,6 +154,67 @@ export class DepositWatcher extends EventEmitter {
       console.log(`[DepositWatcher] Loaded ${wallets.length} HDWaaS wallets`);
     } catch (error) {
       console.error('[DepositWatcher] Failed to load existing wallets:', error);
+    }
+  }
+
+  /**
+   * Load existing payment sessions that still need deposit or confirmation checks.
+   * Pending sessions are resumed only while unexpired; confirming sessions are
+   * always resumed because funds have already been detected on-chain.
+   */
+  private async loadExistingSessions(): Promise<void> {
+    try {
+      const sessions = await sessionRepository.findResumableWatcherSessions();
+      console.log(`[DepositWatcher] Loading ${sessions.length} existing payment sessions...`);
+
+      for (const session of sessions) {
+        if (!session.depositAddress || !session.network || !session.crypto || !session.cryptoAmount) {
+          continue;
+        }
+
+        const apiKey = session.apiKeyId ? await getApiKeyById(session.apiKeyId) : null;
+
+        this.watch({
+          sessionId: session.id,
+          type: session.type,
+          depositAddress: session.depositAddress,
+          network: session.network,
+          cryptoCurrency: session.crypto,
+          expectedAmount: session.cryptoAmount,
+          walletId: session.walletId,
+          derivationIndex: session.derivationIndex,
+          hdChain: session.hdChain,
+          fundingWalletIndex: session.fundingWalletIndex,
+          toAddress: session.parentWallet,
+          expiresAt: session.expiresAt,
+          confirmationThresholds: apiKey?.confirmationThresholds ?? undefined,
+          status: session.status === 'confirming' ? 'confirming' : 'pending',
+          txHash: session.txHash,
+        });
+      }
+
+      console.log(`[DepositWatcher] Loaded ${sessions.length} payment sessions`);
+    } catch (error) {
+      console.error('[DepositWatcher] Failed to load existing payment sessions:', error);
+    }
+  }
+
+  /**
+   * Resume payout for sessions that were confirmed before a restart but did not
+   * make it into the settlement flow.
+   */
+  private async resumeConfirmedSettlements(): Promise<void> {
+    try {
+      const sessions = await sessionRepository.findConfirmedAwaitingSettlement();
+      console.log(`[DepositWatcher] Resuming settlement for ${sessions.length} confirmed sessions...`);
+
+      for (const session of sessions) {
+        settlementService.settleSession(session.id).catch(err =>
+          console.error(`[DepositWatcher] Settlement resume error for session ${session.id.slice(0, 8)}...:`, err.message)
+        );
+      }
+    } catch (error) {
+      console.error('[DepositWatcher] Failed to resume confirmed settlements:', error);
     }
   }
 
@@ -253,6 +318,8 @@ export class DepositWatcher extends EventEmitter {
     toAddress?: string;
     expiresAt: Date;
     confirmationThresholds?: Partial<Record<string, number>>;
+    status?: 'pending' | 'confirming';
+    txHash?: string;
   }): void {
     const chain = NETWORK_TO_WATCHABLE_CHAIN[params.network];
 
@@ -270,7 +337,8 @@ export class DepositWatcher extends EventEmitter {
       fundingWalletIndex: params.fundingWalletIndex,
       toAddress: params.toAddress,
       confirmationThresholds: params.confirmationThresholds,
-      status: 'pending',
+      status: params.status ?? (params.txHash ? 'confirming' : 'pending'),
+      txHash: params.txHash,
       expiresAt: params.expiresAt,
     };
 
@@ -599,7 +667,7 @@ export class DepositWatcher extends EventEmitter {
     watch.lastCheck = new Date();
 
     // Check if session has expired
-    if (new Date() > session.expiresAt) {
+    if (session.status === 'pending' && new Date() > session.expiresAt) {
       this.emitEvent({
         type: 'session_expired',
         chain: session.chain,
@@ -687,6 +755,7 @@ export class DepositWatcher extends EventEmitter {
       // Deposit detected!
       try {
         await sessionManager.markDeposit(session.id, tx.txHash, tx.amountDecimal);
+        await sessionManager.updateConfirmations(session.id, tx.confirmations);
 
         sendPaymentWebhook(session.id, 'payment.confirming').catch(() => {});
 
@@ -793,6 +862,8 @@ export class DepositWatcher extends EventEmitter {
       session.chain === 'bitcoin' && tx.isRbfEnabled
         ? Math.max(baseConfirmations, 3)
         : baseConfirmations;
+
+    await sessionManager.updateConfirmations(session.id, tx.confirmations);
 
     if (tx.confirmations >= effectiveRequired) {
       // Confirmed!
@@ -914,7 +985,7 @@ export class DepositWatcher extends EventEmitter {
 
     // Clean up expired sessions
     for (const [sessionId, watch] of this.activeWatches) {
-      if (now > watch.session.expiresAt) {
+      if (watch.session.status === 'pending' && now > watch.session.expiresAt) {
         this.emitEvent({
           type: 'session_expired',
           chain: watch.session.chain,
@@ -945,8 +1016,9 @@ export class DepositWatcher extends EventEmitter {
     tx: ChainTransaction,
     session: WatchedSession
   ): TransactionValidationResult {
-    // 1. Must have at least 1 confirmation (no zero-conf)
-    if (tx.confirmations < 1) {
+    // 1. Non-BTC deposits must have at least 1 confirmation. BTC can be
+    // detected at zero-conf, but confirmation/settlement is still gated below.
+    if (session.chain !== 'bitcoin' && tx.confirmations < 1) {
       return { valid: false, reason: 'zero_confirmation' };
     }
 
@@ -962,11 +1034,6 @@ export class DepositWatcher extends EventEmitter {
       if (!expectedToken || tx.tokenAddress.toLowerCase() !== expectedToken.toLowerCase()) {
         return { valid: false, reason: 'unverified_token_contract' };
       }
-    }
-
-    // 4. Check for RBF with insufficient confirmations (Bitcoin only)
-    if (session.chain === 'bitcoin' && tx.isRbfEnabled && tx.confirmations < 3) {
-      return { valid: false, reason: 'rbf_insufficient_confirmations' };
     }
 
     return { valid: true };
