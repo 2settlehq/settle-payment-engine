@@ -14,6 +14,13 @@ export interface SessionAlertData {
   fiatCurrency: string;
 }
 
+interface ReceiverAlertData {
+  accountNumber: string;
+  bankCode: string;
+  accountName: string;
+  bankName?: string;
+}
+
 export class TelegramService {
   private readonly config: TelegramAlertConfig;
   private readonly baseUrl = 'https://api.telegram.org/bot';
@@ -75,7 +82,7 @@ export class TelegramService {
    */
   async sendSettlementFailureAlert(
     session: SessionAlertData,
-    receiver: { accountNumber: string; bankCode: string; accountName: string; bankName?: string },
+    receiver: ReceiverAlertData,
     error: string
   ): Promise<boolean> {
     const message = this.formatSettlementFailure(session, receiver, error);
@@ -84,30 +91,35 @@ export class TelegramService {
 
   /**
    * Send alert when Paystack transfer fails due to insufficient balance.
-   * Session stays in 'settling' — admin must top up and manually confirm.
+   * Session stays in 'settling' - admin must top up and manually confirm.
    */
   async sendPaystackInsufficientBalanceAlert(
     session: SessionAlertData,
-    receiver: { accountNumber: string; bankCode: string; accountName: string; bankName?: string },
+    receiver: ReceiverAlertData,
     transferReference: string
   ): Promise<boolean> {
-    const bankDisplay = receiver.bankName || receiver.bankCode;
+    const bankDisplay = this.escapeHtml(receiver.bankName || receiver.bankCode);
     const amount = session.fiatAmount.toLocaleString();
+    const fiatCurrency = this.escapeHtml(session.fiatCurrency);
+    const reference = this.escapeHtml(session.reference);
+    const accountNumber = this.escapeHtml(receiver.accountNumber);
+    const accountName = this.escapeHtml(receiver.accountName);
+    const escapedTransferReference = this.escapeHtml(transferReference);
 
     const message = `
-<b>⚠️ Paystack Insufficient Balance</b>
+<b>Paystack Insufficient Balance</b>
 
-Settlement could not complete — your Paystack balance is too low.
+Settlement could not complete - your Paystack balance is too low.
 
-<b>Session:</b> ${session.reference}
-<b>Amount:</b> ${session.fiatCurrency} ${amount}
-<b>Account:</b> ${receiver.accountNumber}
+<b>Session:</b> ${reference}
+<b>Amount:</b> ${fiatCurrency} ${amount}
+<b>Account:</b> ${accountNumber}
 <b>Bank:</b> ${bankDisplay}
-<b>Name:</b> ${receiver.accountName}
-<b>Transfer Ref:</b> ${transferReference}
+<b>Name:</b> ${accountName}
+<b>Transfer Ref:</b> ${escapedTransferReference}
 
 <b>Action:</b> Top up Paystack balance, then either retry the transfer or settle manually:
-<code>/settle ${session.reference}</code>
+<code>/settle ${reference}</code>
     `.trim();
 
     return this.sendMessage(message);
@@ -117,12 +129,14 @@ Settlement could not complete — your Paystack balance is too low.
    * Send proactive low balance warning (before transfers fail).
    */
   async sendPaystackLowBalanceAlert(balance: number, currency: string = 'NGN'): Promise<boolean> {
+    const escapedCurrency = this.escapeHtml(currency);
+
     const message = `
-<b>⚠️ Paystack Low Balance Warning</b>
+<b>Paystack Low Balance Warning</b>
 
 Your Paystack balance is running low.
 
-<b>Current Balance:</b> ${currency} ${balance.toLocaleString()}
+<b>Current Balance:</b> ${escapedCurrency} ${balance.toLocaleString()}
 
 Top up your Paystack account to avoid failed settlements.
     `.trim();
@@ -147,25 +161,29 @@ Top up your Paystack account to avoid failed settlements.
    */
   formatSettlementFailure(
     session: SessionAlertData,
-    receiver: { accountNumber: string; bankCode: string; accountName: string; bankName?: string },
+    receiver: ReceiverAlertData,
     error: string
   ): string {
-    const bankDisplay = receiver.bankName || receiver.bankCode;
+    const bankDisplay = this.escapeHtml(receiver.bankName || receiver.bankCode);
     const amount = session.fiatAmount.toLocaleString();
+    const fiatCurrency = this.escapeHtml(session.fiatCurrency);
+    const reference = this.escapeHtml(session.reference);
+    const accountNumber = this.escapeHtml(receiver.accountNumber);
+    const accountName = this.escapeHtml(receiver.accountName);
 
     return `
 <b>Manual Settlement Required</b>
 
-<b>Session:</b> ${session.reference}
-<b>Amount:</b> ${session.fiatCurrency} ${amount}
-<b>Account:</b> ${receiver.accountNumber}
+<b>Session:</b> ${reference}
+<b>Amount:</b> ${fiatCurrency} ${amount}
+<b>Account:</b> ${accountNumber}
 <b>Bank:</b> ${bankDisplay}
-<b>Name:</b> ${receiver.accountName}
+<b>Name:</b> ${accountName}
 
 <b>Error:</b> ${this.escapeHtml(error)}
 
 After manual payment, use:
-<code>/settle ${session.reference}</code>
+<code>/settle ${reference}</code>
     `.trim();
   }
 
@@ -178,13 +196,16 @@ After manual payment, use:
     reason: string
   ): string {
     const amount = session.fiatAmount.toLocaleString();
+    const sessionReference = this.escapeHtml(session.reference);
+    const fiatCurrency = this.escapeHtml(session.fiatCurrency);
+    const escapedReference = this.escapeHtml(reference);
 
     return `
 <b>Settlement Reversed</b>
 
-<b>Session:</b> ${session.reference}
-<b>Amount:</b> ${session.fiatCurrency} ${amount}
-<b>Reference:</b> ${reference}
+<b>Session:</b> ${sessionReference}
+<b>Amount:</b> ${fiatCurrency} ${amount}
+<b>Reference:</b> ${escapedReference}
 
 <b>Reason:</b> ${this.escapeHtml(reason)}
 
