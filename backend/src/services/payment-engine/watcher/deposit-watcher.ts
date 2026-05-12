@@ -190,6 +190,7 @@ export class DepositWatcher extends EventEmitter {
           confirmationThresholds: apiKey?.confirmationThresholds ?? undefined,
           status: session.status === 'confirming' ? 'confirming' : 'pending',
           txHash: session.txHash,
+          receivedAmount: session.receivedAmount,
         });
       }
 
@@ -320,6 +321,7 @@ export class DepositWatcher extends EventEmitter {
     confirmationThresholds?: Partial<Record<string, number>>;
     status?: 'pending' | 'confirming';
     txHash?: string;
+    receivedAmount?: number;
   }): void {
     const chain = NETWORK_TO_WATCHABLE_CHAIN[params.network];
 
@@ -339,6 +341,7 @@ export class DepositWatcher extends EventEmitter {
       confirmationThresholds: params.confirmationThresholds,
       status: params.status ?? (params.txHash ? 'confirming' : 'pending'),
       txHash: params.txHash,
+      receivedAmount: params.receivedAmount,
       expiresAt: params.expiresAt,
     };
 
@@ -774,6 +777,7 @@ export class DepositWatcher extends EventEmitter {
             ...session,
             status: 'confirming',
             txHash: tx.txHash,
+            receivedAmount: tx.amountDecimal,
           };
         }
 
@@ -821,22 +825,72 @@ export class DepositWatcher extends EventEmitter {
       return;
     }
 
-    const tx = await adapter.getTransaction(session.txHash);
+    const tokenAddress = this.getTokenAddress(session.network, session.cryptoCurrency);
+    let tx = await adapter.getTransaction(session.txHash, {
+      address: session.depositAddress,
+      tokenAddress,
+    });
 
     if (!tx) {
-      // Transaction not found - possible reorg
+      const replacement = await this.findReplacementDeposit(session, adapter);
+      if (replacement) {
+        await sessionManager.replaceDepositTx(
+          session.id,
+          replacement.txHash,
+          replacement.amountDecimal,
+          replacement.confirmations
+        );
+
+        const watch = this.activeWatches.get(session.id);
+        if (watch) {
+          watch.session = {
+            ...session,
+            txHash: replacement.txHash,
+            receivedAmount: replacement.amountDecimal,
+          };
+        }
+
+        tx = replacement;
+      } else {
+        // Transaction not found - possible reorg
+        const event: WatcherEvent = {
+          type: 'reorg_detected',
+          chain: session.chain,
+          sessionId: session.id,
+          txHash: session.txHash,
+          timestamp: new Date(),
+        };
+        this.emitEvent(event);
+        await txStore.logFraudEvent(event);
+        console.warn(
+          `[DepositWatcher] Possible reorg: TX ${session.txHash.slice(0, 12)}... not found`
+        );
+        return;
+      }
+    }
+
+    const validation = this.validateTransaction(tx, session);
+    if (!validation.valid) {
+      await this.handleInvalidTransaction(tx, session, validation);
+      return;
+    }
+
+    const amountMatch = this.checkAmountMatch(tx.amountDecimal, session.expectedAmount);
+    if (amountMatch === 'underpaid') {
       const event: WatcherEvent = {
-        type: 'reorg_detected',
+        type: 'underpaid_deposit',
         chain: session.chain,
         sessionId: session.id,
-        txHash: session.txHash,
+        txHash: tx.txHash,
+        details: {
+          expected: session.expectedAmount,
+          received: tx.amountDecimal,
+          shortfall: session.expectedAmount - tx.amountDecimal,
+        },
         timestamp: new Date(),
       };
       this.emitEvent(event);
       await txStore.logFraudEvent(event);
-      console.warn(
-        `[DepositWatcher] Possible reorg: TX ${session.txHash.slice(0, 12)}... not found`
-      );
       return;
     }
 
@@ -908,7 +962,11 @@ export class DepositWatcher extends EventEmitter {
               network: session.network,
               fromAddress: session.depositAddress,
               derivationIndex: session.derivationIndex,
-              amount: tx.amountDecimal.toString(),
+              amount: (
+                this.activeWatches.get(session.id)?.session.receivedAmount ??
+                session.receivedAmount ??
+                tx.amountDecimal
+              ).toString(),
               cryptoCurrency: session.cryptoCurrency,
               tokenContract: tx.tokenAddress,
               fundingWalletIndex: session.fundingWalletIndex,
@@ -939,6 +997,50 @@ export class DepositWatcher extends EventEmitter {
         console.error(`[DepositWatcher] Error confirming deposit:`, error);
       }
     }
+  }
+
+  /**
+   * If the originally detected tx can no longer be fetched, look for a newer
+   * valid payment to the same deposit address. This primarily covers Bitcoin
+   * RBF replacements, but it also helps with explorer inconsistencies.
+   */
+  private async findReplacementDeposit(
+    session: WatchedSession,
+    adapter: ChainAdapter
+  ): Promise<ChainTransaction | null> {
+    const tokenAddress = this.getTokenAddress(session.network, session.cryptoCurrency);
+    const transactions = await adapter.getTransactions(session.depositAddress, {
+      tokenAddress,
+      limit: 10,
+    });
+
+    for (const candidate of transactions) {
+      if (candidate.txHash === session.txHash) continue;
+
+      const validation = this.validateTransaction(candidate, session);
+      if (!validation.valid) continue;
+
+      const amountMatch = this.checkAmountMatch(candidate.amountDecimal, session.expectedAmount);
+      if (amountMatch === 'underpaid') continue;
+
+      this.emitEvent({
+        type: session.chain === 'bitcoin' ? 'rbf_replacement' : 'deposit_detected',
+        chain: session.chain,
+        sessionId: session.id,
+        txHash: candidate.txHash,
+        details: {
+          replacedTxHash: session.txHash,
+          received: candidate.amountDecimal,
+          confirmations: candidate.confirmations,
+          amountMatch,
+        },
+        timestamp: new Date(),
+      });
+
+      return candidate;
+    }
+
+    return null;
   }
 
   /**
@@ -1020,6 +1122,10 @@ export class DepositWatcher extends EventEmitter {
     // detected at zero-conf, but confirmation/settlement is still gated below.
     if (session.chain !== 'bitcoin' && tx.confirmations < 1) {
       return { valid: false, reason: 'zero_confirmation' };
+    }
+
+    if (tx.status === 'failed') {
+      return { valid: false, reason: 'failed_transaction' };
     }
 
     // 2. Check dust threshold

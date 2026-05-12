@@ -8,7 +8,7 @@
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
-import { ChainAdapter, GetTransactionsOptions } from './chain-adapter';
+import { ChainAdapter, GetTransactionOptions, GetTransactionsOptions } from './chain-adapter';
 import { ChainTransaction, ChainWatcherConfig, VERIFIED_TOKENS } from '../types';
 
 // =============================================================================
@@ -215,7 +215,10 @@ export class TronAdapter extends ChainAdapter {
   /**
    * Get a specific transaction by hash.
    */
-  async getTransaction(txHash: string): Promise<ChainTransaction | null> {
+  async getTransaction(
+    txHash: string,
+    options?: GetTransactionOptions
+  ): Promise<ChainTransaction | null> {
     await this.enforceRateLimit();
 
     try {
@@ -250,6 +253,16 @@ export class TronAdapter extends ChainAdapter {
           ? infoResponse.data as TronGridTxInfo
           : null;
       const currentBlock = await this.getCurrentBlockNumber();
+
+      if (options?.address) {
+        const addressTxs = options.tokenAddress
+          ? await this.getTrc20Transactions(options.address, options.tokenAddress, currentBlock, 25)
+          : await this.getNativeTransactions(options.address, currentBlock, 25);
+        const matchedTx = addressTxs.find((candidate) => candidate.txHash === txHash);
+        if (matchedTx) return matchedTx;
+        return null;
+      }
+
       const contract = tx.raw_data.contract[0];
       const contractType = contract?.type;
 
