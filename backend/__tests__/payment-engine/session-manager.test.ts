@@ -326,7 +326,19 @@ describe('SessionManager', () => {
         expect(updated.receivedAmount).toBe(31.5);
       });
 
-      it('should update payout from actual received amount', async () => {
+      it('should preserve quoted payout when expected amount is received', async () => {
+        const mockSession = createMockSession({ status: 'pending', fiatAmount: 50000 });
+        mockRepo._addSession(mockSession);
+
+        const updated = await manager.markDeposit(mockSession.id, '0xabc...', 31.5625);
+
+        expect(updated.fiatAmount).toBe(50000);
+        expect(updated.settledFiatAmount).toBe(50000);
+        expect(updated.chargeAmount).toBe(500);
+        expect(updated.transactionUsd).toBeCloseTo(31.25);
+      });
+
+      it('should update payout from actual received amount when underpaid', async () => {
         const mockSession = createMockSession({ status: 'pending', fiatAmount: 50000 });
         mockRepo._addSession(mockSession);
 
@@ -336,6 +348,18 @@ describe('SessionManager', () => {
         expect(updated.settledFiatAmount).toBe(44300);
         expect(updated.chargeAmount).toBe(500);
         expect(updated.transactionUsd).toBeCloseTo(27.6875);
+      });
+
+      it('should update payout from actual received amount when overpaid', async () => {
+        const mockSession = createMockSession({ status: 'pending', fiatAmount: 50000 });
+        mockRepo._addSession(mockSession);
+
+        const updated = await manager.markDeposit(mockSession.id, '0xabc...', 40);
+
+        expect(updated.fiatAmount).toBe(50000);
+        expect(updated.settledFiatAmount).toBe(63500);
+        expect(updated.chargeAmount).toBe(500);
+        expect(updated.transactionUsd).toBeCloseTo(39.6875);
       });
 
       it('should throw for non-pending session', async () => {
