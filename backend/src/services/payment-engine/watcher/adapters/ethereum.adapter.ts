@@ -146,6 +146,8 @@ export class EthereumAdapter extends ChainAdapter {
     currentBlock: number,
     limit?: number
   ): Promise<ChainTransaction[]> {
+    await this.enforceRateLimit();
+
     const response = await this.client.get<EtherscanResponse<EtherscanNormalTx[]>>('', {
       params: {
         chainid: this.chainId,
@@ -213,6 +215,8 @@ export class EthereumAdapter extends ChainAdapter {
     currentBlock: number,
     limit?: number
   ): Promise<ChainTransaction[]> {
+    await this.enforceRateLimit();
+
     const response = await this.client.get<EtherscanResponse<EtherscanTokenTx[]>>('', {
       params: {
         chainid: this.chainId,

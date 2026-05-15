@@ -41,7 +41,7 @@ export const config = {
         apiUrl:
           process.env.ETHERSCAN_API_URL || "https://api.etherscan.io/v2/api",
         rateLimitMs: parseInt(
-          process.env.WATCHER_ETHEREUM_RATE_LIMIT_MS || "200",
+          process.env.WATCHER_ETHEREUM_RATE_LIMIT_MS || "400",
           10,
         ),
       },
@@ -57,7 +57,7 @@ export const config = {
         apiUrl:
           process.env.BSCSCAN_API_URL || "https://api.etherscan.io/v2/api",
         rateLimitMs: parseInt(
-          process.env.WATCHER_BSC_RATE_LIMIT_MS || "200",
+          process.env.WATCHER_BSC_RATE_LIMIT_MS || "400",
           10,
         ),
       },

@@ -40,6 +40,7 @@ export abstract class ChainAdapter {
   protected readonly chain: WatchableChain;
   protected readonly config: ChainWatcherConfig;
   protected lastCallTime: number = 0;
+  private rateLimitQueue: Promise<void> = Promise.resolve();
 
   constructor(chain: WatchableChain, config: ChainWatcherConfig) {
     this.chain = chain;
@@ -48,19 +49,31 @@ export abstract class ChainAdapter {
 
   /**
    * Rate limit enforcement.
-   * Ensures minimum delay between API calls.
+   * Ensures minimum delay between API calls, serialized across concurrent polls.
    */
   protected async enforceRateLimit(): Promise<void> {
     if (!this.config.rateLimitMs) return;
 
-    const elapsed = Date.now() - this.lastCallTime;
-    const remaining = this.config.rateLimitMs - elapsed;
+    const previous = this.rateLimitQueue;
+    let release!: () => void;
+    this.rateLimitQueue = new Promise((resolve) => {
+      release = resolve;
+    });
 
-    if (remaining > 0) {
-      await new Promise((resolve) => setTimeout(resolve, remaining));
+    await previous;
+
+    try {
+      const elapsed = Date.now() - this.lastCallTime;
+      const remaining = this.config.rateLimitMs - elapsed;
+
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
+
+      this.lastCallTime = Date.now();
+    } finally {
+      release();
     }
-
-    this.lastCallTime = Date.now();
   }
 
   /**
