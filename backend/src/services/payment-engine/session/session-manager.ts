@@ -155,6 +155,14 @@ export class SessionManager {
       );
     }
 
+    if (session.cryptoAmount && receivedAmount === session.cryptoAmount) {
+      return {
+        settledFiatAmount: session.fiatAmount,
+        transactionUsd: session.transactionUsd ?? session.fiatAmount / session.rate,
+        chargeAmount: session.chargeAmount,
+      };
+    }
+
     const actualCharges = calculateChargesFromCrypto(
       receivedAmount,
       session.crypto,
