@@ -21,6 +21,13 @@ interface ReceiverAlertData {
   bankName?: string;
 }
 
+interface TelegramInlineKeyboardMarkup {
+  inline_keyboard: Array<Array<{
+    text: string;
+    callback_data: string;
+  }>>;
+}
+
 export class TelegramService {
   private readonly config: TelegramAlertConfig;
   private readonly baseUrl = 'https://api.telegram.org/bot';
@@ -43,7 +50,7 @@ export class TelegramService {
   /**
    * Send a message to the configured Telegram chat
    */
-  async sendMessage(message: string): Promise<boolean> {
+  async sendMessage(message: string, replyMarkup?: TelegramInlineKeyboardMarkup): Promise<boolean> {
     if (!this.isEnabled()) {
       console.warn('[Telegram] Alerts disabled or not configured');
       return false;
@@ -61,6 +68,7 @@ export class TelegramService {
           chat_id: this.config.chatId,
           text: message,
           parse_mode: 'HTML',
+          ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
         }),
       });
 
@@ -78,6 +86,84 @@ export class TelegramService {
   }
 
   /**
+   * Acknowledge a Telegram button press.
+   */
+  async answerCallbackQuery(callbackQueryId: string, text: string, showAlert = false): Promise<boolean> {
+    if (!this.isEnabled()) {
+      console.warn('[Telegram] Alerts disabled or not configured');
+      return false;
+    }
+
+    try {
+      const url = `${this.baseUrl}${this.config.botToken}/answerCallbackQuery`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          callback_query_id: callbackQueryId,
+          text,
+          show_alert: showAlert,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        console.error('[Telegram] Failed to answer callback query:', error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('[Telegram] Error answering callback query:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Remove or replace buttons on an existing Telegram message.
+   */
+  async editMessageReplyMarkup(
+    chatId: string | number,
+    messageId: number,
+    replyMarkup?: TelegramInlineKeyboardMarkup
+  ): Promise<boolean> {
+    if (!this.isEnabled()) {
+      console.warn('[Telegram] Alerts disabled or not configured');
+      return false;
+    }
+
+    try {
+      const url = `${this.baseUrl}${this.config.botToken}/editMessageReplyMarkup`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: replyMarkup || { inline_keyboard: [] },
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        console.error('[Telegram] Failed to edit message reply markup:', error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('[Telegram] Error editing message reply markup:', error);
+      return false;
+    }
+  }
+
+  /**
    * Send alert for settlement API failure
    */
   async sendSettlementFailureAlert(
@@ -86,7 +172,7 @@ export class TelegramService {
     error: string
   ): Promise<boolean> {
     const message = this.formatSettlementFailure(session, receiver, error);
-    return this.sendMessage(message);
+    return this.sendMessage(message, this.manualSettlementKeyboard(session.reference));
   }
 
   /**
@@ -118,11 +204,10 @@ Settlement could not complete - your Paystack balance is too low.
 <b>Name:</b> ${accountName}
 <b>Transfer Ref:</b> ${escapedTransferReference}
 
-<b>Action:</b> Top up Paystack balance, then either retry the transfer or settle manually:
-<code>/settle ${reference}</code>
+<b>Action:</b> Top up Paystack balance, then either retry the transfer or use the buttons below after manual payout.
     `.trim();
 
-    return this.sendMessage(message);
+    return this.sendMessage(message, this.manualSettlementKeyboard(session.reference));
   }
 
   /**
@@ -182,8 +267,7 @@ Top up your Paystack account to avoid failed settlements.
 
 <b>Error:</b> ${this.escapeHtml(error)}
 
-After manual payment, use:
-<code>/settle ${reference}</code>
+After manual payment, use the buttons below.
     `.trim();
   }
 
@@ -221,6 +305,17 @@ After manual payment, use:
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
+  }
+
+  private manualSettlementKeyboard(reference: string): TelegramInlineKeyboardMarkup {
+    return {
+      inline_keyboard: [
+        [
+          { text: 'Settlement completed', callback_data: `settle:${reference}` },
+          { text: 'Not completed', callback_data: `not_settled:${reference}` },
+        ],
+      ],
+    };
   }
 }
 

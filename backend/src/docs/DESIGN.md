@@ -949,7 +949,7 @@ After a crypto deposit is confirmed on-chain, the system automatically initiates
 **Important**: There is no `settlement_failed` status. If the Mongoro API call fails:
 - Session remains in `settling` status
 - Telegram alert sent to admin group with bank details
-- Admin pays manually and marks as `settled` via `/settle {reference}` command
+- Admin pays manually and marks as `settled` by pressing the Telegram `Settlement completed` button
 
 ### Reversal Protection
 
@@ -983,8 +983,11 @@ Name: John Doe
 
 Error: [error message]
 
-After manual payment, use:
-/settle 2S-ABC123
+After manual payment, press:
+[Settlement completed]
+
+If payout has not been completed, press:
+[Not completed]
 ```
 
 **Reversal Alert**:
@@ -1034,30 +1037,55 @@ SETTLEMENT_ENABLED=true
 MONGORO_API_URL=https://api-biz-dev.mongoro.com/api/v1/openapi
 MONGORO_TOKEN=your_token
 MONGORO_TRANSFERPIN=your_pin
-MONGORO_CALLBACK_URL=https://yourapp.com/webhooks/mongoro
+MONGORO_CALLBACK_URL=https://yourapp.com/v1/webhooks/mongoro
+
+# Paystack Settlement
+PAYSTACK_SECRET_KEY=sk_live_xxx
+PAYSTACK_WEBHOOK_SECRET=your_paystack_webhook_secret
 
 # Telegram Alerts
 TELEGRAM_ALERTS_ENABLED=true
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
+TELEGRAM_WEBHOOK_SECRET=your_telegram_webhook_secret
 ```
 
-### Webhook Endpoint
+### Webhook Endpoints
 
 ```
-POST /webhooks/mongoro
+POST /v1/webhooks/mongoro
 ```
 
-Receives status updates from Mongoro after transfer completion or failure.
+Receives status updates from Mongoro after transfer completion or failure. Configure this URL as the Mongoro callback URL. If `MONGORO_WEBHOOK_IPS` is configured, the endpoint accepts requests only from those IPs.
+
+```
+POST /v1/webhooks/paystack
+```
+
+Receives Paystack transfer events: `transfer.success`, `transfer.failed`, and `transfer.reversed`. Configure this URL in the Paystack dashboard. The endpoint verifies Paystack's `x-paystack-signature` header using `PAYSTACK_WEBHOOK_SECRET`.
+
+```
+POST /v1/webhooks/telegram
+```
+
+Receives Telegram inline button callbacks. Configure this URL as the Telegram bot webhook and set Telegram's `secret_token` to `TELEGRAM_WEBHOOK_SECRET`; the endpoint rejects requests when the secret is missing or invalid. When an admin presses `Settlement completed`, the backend calls the manual settlement flow. When an admin presses `Not completed`, the payment remains in `settling`.
+
+Example webhook setup:
+
+```bash
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+  -d "url=https://yourapp.com/v1/webhooks/telegram" \
+  -d "secret_token=$TELEGRAM_WEBHOOK_SECRET"
+```
 
 ### Manual Settlement Endpoint
 
 ```
-POST /admin/sessions/:reference/settle
+POST /v1/admin/api-keys/sessions/:reference/settle
 Authorization: Bearer <ADMIN_SECRET>
 ```
 
-Called by the Telegram bot when admin uses `/settle {reference}` command after manual payment.
+Called internally by the Telegram button flow, or directly by an admin tool after manual payment.
 
 ---
 

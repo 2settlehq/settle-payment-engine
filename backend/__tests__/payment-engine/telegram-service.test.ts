@@ -6,6 +6,7 @@ describe('TelegramService', () => {
     enabled: true,
     botToken: '123:test-token',
     chatId: '456',
+    webhookSecret: '',
   });
 
   const session = {

@@ -120,6 +120,7 @@ export const config = {
       enabled: process.env.TELEGRAM_ALERTS_ENABLED === "true",
       botToken: process.env.TELEGRAM_BOT_TOKEN || "",
       chatId: process.env.TELEGRAM_CHAT_ID || "",
+      webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || "",
     },
   },
 

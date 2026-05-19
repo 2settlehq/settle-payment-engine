@@ -92,6 +92,7 @@ export interface TelegramAlertConfig {
   enabled: boolean;
   botToken: string;
   chatId: string;
+  webhookSecret: string;
 }
 
 export interface MongoroConfig {
