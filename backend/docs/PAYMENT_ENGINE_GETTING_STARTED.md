@@ -1318,7 +1318,12 @@ Yes, with a 2% tolerance. Overpayments are processed normally. Significant under
 
 1. System retries automatically
 2. If retries fail, Telegram alert is sent to admin
-3. Admin can manually trigger settlement via `/v1/admin/sessions/:reference/settle`
+3. Admin can manually trigger settlement from the Telegram alert buttons, or by calling `POST /v1/admin/api-keys/sessions/:reference/settle`
+
+Settlement webhooks:
+- Mongoro callbacks: `POST /v1/webhooks/mongoro`
+- Paystack transfer events: `POST /v1/webhooks/paystack`
+- Telegram button callbacks: `POST /v1/webhooks/telegram`
 
 ### How long do payments take?
 
