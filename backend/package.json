@@ -11,6 +11,7 @@
     "recover": "tsx scripts/recover-stuck-hd-sweep.ts",
     "recover:hd-sweep": "tsx scripts/recover-stuck-hd-sweep.ts",
     "start": "node dist/index.js",
+    "sync:paystack-banks": "tsx scripts/sync-paystack-banks.ts",
     "update:gift-fields-by-amount": "node scripts/update-gift-fields-by-amount.js",
     "lint": "eslint src --ext .ts",
     "test": "vitest",
