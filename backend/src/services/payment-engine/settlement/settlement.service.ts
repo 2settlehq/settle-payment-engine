@@ -60,6 +60,9 @@ export class SettlementService {
   private readonly mongoro: MongoroService;
   private readonly paystack: PaystackService;
   private readonly telegram: TelegramService;
+  private paystackBanksCache: { banks: PaystackBankLike[]; fetchedAt: number } | null = null;
+  private paystackBanksFetch: Promise<PaystackBankLike[]> | null = null;
+  private readonly paystackBanksCacheTtlMs = 24 * 60 * 60 * 1000;
 
   constructor(
     settlementConfig: SettlementConfig = config.settlement,
@@ -192,7 +195,24 @@ export class SettlementService {
       }
 
       // 5b. Paystack mode — resolve the correct Paystack bank code (lazy fetch + cache)
-      const paystackBankCode = await this.resolvePaystackBankCode(receiver.bankCode, receiver.bankName);
+      let paystackBankCode: string;
+      try {
+        paystackBankCode = await this.resolvePaystackBankCode(receiver.bankCode, receiver.bankName);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.createSettlementAttempt({
+          sessionId,
+          provider: 'paystack',
+          status: 'failed',
+          amount: payoutFiatAmount,
+          accountNumber: receiver.accountNumber,
+          bankCode: receiver.bankCode,
+          accountName: receiver.accountName,
+          errorMessage: message,
+        });
+        await this.handleSettlementFailure(session, receiver, message);
+        return;
+      }
 
       const attemptId = await this.createSettlementAttempt({
         sessionId,
@@ -719,9 +739,12 @@ export class SettlementService {
       console.warn(`[Settlement] Could not match CBN code ${cbnCode} ("${bankName}") to a Paystack bank — using CBN code as fallback`);
     } catch (err: any) {
       console.error(`[Settlement] Paystack bank list fetch failed for ${cbnCode}:`, err.message);
+      throw new Error(
+        `Could not resolve Paystack bank code for ${cbnCode} (${bankName || 'unknown bank'}): ${err.message}`
+      );
     }
 
-    return cbnCode; // fallback — Paystack will reject if wrong, but we log it above
+    throw new Error(`Could not match bank ${cbnCode} (${bankName || 'unknown bank'}) to a Paystack bank code`);
   }
 
   private async cachePaystackBankCode(cbnCode: string, paystackCode: string): Promise<void> {
@@ -730,14 +753,40 @@ export class SettlementService {
   }
 
   private async fetchPaystackBanks(secretKey: string): Promise<PaystackBankLike[]> {
+    const now = Date.now();
+    if (
+      this.paystackBanksCache &&
+      now - this.paystackBanksCache.fetchedAt < this.paystackBanksCacheTtlMs
+    ) {
+      return this.paystackBanksCache.banks;
+    }
+
+    if (this.paystackBanksFetch) {
+      return this.paystackBanksFetch;
+    }
+
+    this.paystackBanksFetch = this.fetchPaystackBanksFromApi(secretKey)
+      .then((banks) => {
+        this.paystackBanksCache = { banks, fetchedAt: Date.now() };
+        return banks;
+      })
+      .finally(() => {
+        this.paystackBanksFetch = null;
+      });
+
+    return this.paystackBanksFetch;
+  }
+
+  private async fetchPaystackBanksFromApi(secretKey: string): Promise<PaystackBankLike[]> {
     const banks: PaystackBankLike[] = [];
     const perPage = 100;
     let page = 1;
+    const timeout = parseInt(process.env.PAYSTACK_BANK_LIST_TIMEOUT_MS || '30000', 10);
 
     while (true) {
       const res = await axios.get<{ status: boolean; data: PaystackBankLike[] }>(
         `https://api.paystack.co/bank?country=nigeria&perPage=${perPage}&page=${page}&include_nip_sort_code=true`,
-        { headers: { Authorization: `Bearer ${secretKey}` }, timeout: 10000 }
+        { headers: { Authorization: `Bearer ${secretKey}` }, timeout }
       );
 
       const chunk = res.data?.data ?? [];
