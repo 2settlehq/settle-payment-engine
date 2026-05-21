@@ -52,15 +52,33 @@ async function fetchPaystackBanks(): Promise<PaystackBank[]> {
   const banks: PaystackBank[] = [];
   let page = 1;
   const perPage = 100;
+  const maxPages = 20;
+  const seenPageSignatures = new Set<string>();
 
   while (true) {
+    if (page > maxPages) {
+      throw new Error(`Paystack bank pagination exceeded ${maxPages} pages; aborting to avoid an infinite loop`);
+    }
+
     const res = await axios.get<{ status: boolean; data: PaystackBank[] }>(
       `https://api.paystack.co/bank?country=nigeria&perPage=${perPage}&page=${page}&include_nip_sort_code=true`,
       { headers: { Authorization: `Bearer ${key}` }, timeout: 15000 }
     );
     const chunk = res.data.data;
+    console.log(`  Page ${page}: ${chunk?.length ?? 0} banks returned (total: ${banks.length + (chunk?.length ?? 0)})`);
     if (!chunk || chunk.length === 0) break;
+
+    const pageSignature = chunk.map(bank => `${bank.id}:${bank.code}`).join('|');
+    if (seenPageSignatures.has(pageSignature)) {
+      throw new Error(`Paystack returned a repeated bank page at page ${page}; aborting to avoid an infinite loop`);
+    }
+    seenPageSignatures.add(pageSignature);
+
     banks.push(...chunk);
+    if (chunk.length > perPage) {
+      console.log(`  Paystack returned more than ${perPage} banks on one page; treating response as complete.`);
+      break;
+    }
     if (chunk.length < perPage) break;
     page++;
   }
