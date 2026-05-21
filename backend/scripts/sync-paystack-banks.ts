@@ -8,6 +8,7 @@
  * Usage:
  *   npx tsx scripts/sync-paystack-banks.ts
  *   npx tsx scripts/sync-paystack-banks.ts --dry-run
+ *   npx tsx scripts/sync-paystack-banks.ts --db-host=localhost --db-user=root --db-password=secret --db-name=2settle
  *
  * Prerequisites:
  *   ALTER TABLE banks ADD COLUMN IF NOT EXISTS paystack_code VARCHAR(20) NULL;
@@ -22,6 +23,31 @@ import { PaystackBankLike, findPaystackBankMatch } from '../src/services/payment
 
 // dotenv MUST load before the mysql pool is created — use require() to prevent import hoisting
 dotenv.config({ path: resolve(__dirname, '../.env') });
+
+function getArg(name: string): string | undefined {
+  const prefix = `${name}=`;
+  const inline = process.argv.find(arg => arg.startsWith(prefix));
+  if (inline) return inline.slice(prefix.length);
+
+  const index = process.argv.indexOf(name);
+  if (index !== -1) return process.argv[index + 1];
+
+  return undefined;
+}
+
+const dbArgMap: Array<[string, string]> = [
+  ['--db-host', 'DB_HOST'],
+  ['--db-port', 'DB_PORT'],
+  ['--db-user', 'DB_USER'],
+  ['--db-password', 'DB_PASSWORD'],
+  ['--db-name', 'DB_NAME'],
+  ['--db-database', 'DB_NAME'],
+];
+
+for (const [argName, envName] of dbArgMap) {
+  const value = getArg(argName);
+  if (value !== undefined) process.env[envName] = value;
+}
 
 const pool: Pool = require('../src/lib/mysql').pool;
 
