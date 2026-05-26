@@ -6,10 +6,10 @@
  * known aliases and fuzzy bank names.
  *
  * Usage:
- *   npx tsx scripts/sync-paystack-banks.ts
- *   npx tsx scripts/sync-paystack-banks.ts --dry-run
- *   npx tsx scripts/sync-paystack-banks.ts --db-host=localhost --db-user=root --db-password=secret --db-name=2settle
- *   npx tsx scripts/sync-paystack-banks.ts --host localhost --user root --password secret --db 2settle
+ *   pnpm run sync:paystack-banks -- --dry-run
+ *   pnpm run sync:paystack-banks
+ *   pnpm run sync:paystack-banks -- --dry-run --db-host YOUR_HOST --db-user YOUR_USER --db-password YOUR_PASSWORD --db-name YOUR_DB
+ *   pnpm run sync:paystack-banks -- --host YOUR_HOST --user YOUR_USER --password YOUR_PASSWORD --db YOUR_DB
  *
  * Prerequisites:
  *   ALTER TABLE banks ADD COLUMN IF NOT EXISTS paystack_code VARCHAR(20) NULL;
