@@ -12,6 +12,7 @@ import {
 import {
   InvalidInputError,
   InvalidSessionStateError,
+  ReceiverWalletInUseError,
   SessionNotFoundError,
   UnsupportedCryptoNetworkError,
 } from '../errors';
@@ -142,6 +143,20 @@ export class SessionManager {
   ) {
     this.repository = repository;
     this.config = config;
+  }
+
+  private async assertDepositAddressAvailable(
+    depositAddress: string,
+    excludeSessionId?: string
+  ): Promise<void> {
+    const activeSession = await this.repository.findActiveByDepositAddress(
+      depositAddress,
+      excludeSessionId
+    );
+
+    if (activeSession) {
+      throw new ReceiverWalletInUseError(depositAddress, activeSession.id);
+    }
   }
 
   private calculateActualReceivedUpdate(
@@ -297,6 +312,7 @@ export class SessionManager {
         depositAddress = receiverWallet.address;
         derivationIndex = receiverWallet.derivationIndex;
         hdChain = receiverWallet.hdChain;
+        await this.assertDepositAddressAvailable(depositAddress);
       } else {
         const derivation = await hdWallet.deriveNextAddress(resolvedInput.network!);
         depositAddress = derivation.address;
@@ -675,6 +691,7 @@ export class SessionManager {
         depositAddress = receiverWallet.address;
         derivationIndex = receiverWallet.derivationIndex;
         hdChain = receiverWallet.hdChain;
+        await this.assertDepositAddressAvailable(depositAddress, sessionId);
       } else {
         const derivation = await hdWallet.deriveNextAddress(network as any);
         depositAddress = derivation.address;

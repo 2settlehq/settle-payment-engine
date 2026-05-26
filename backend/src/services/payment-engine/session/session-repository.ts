@@ -251,6 +251,43 @@ export class SessionRepository {
     }
   }
 
+  async findActiveByDepositAddress(
+    depositAddress: string,
+    excludeSessionId?: string
+  ): Promise<PaymentSession | null> {
+    const pool = (await import('../../../lib/mysql')).default;
+
+    try {
+      const values: any[] = [depositAddress];
+      const excludeClause = excludeSessionId ? 'AND id <> ?' : '';
+
+      if (excludeSessionId) {
+        values.push(excludeSessionId);
+      }
+
+      const [rows] = await pool.query<any[]>(
+        `SELECT * FROM payment_sessions
+         WHERE deposit_address = ?
+           ${excludeClause}
+           AND (
+             (status = 'pending' AND expires_at > NOW())
+             OR status = 'confirming'
+           )
+         ORDER BY created_at ASC
+         LIMIT 1`,
+        values
+      );
+
+      if (!rows || rows.length === 0) {
+        return null;
+      }
+
+      return rowToSession(rows[0]);
+    } catch (error) {
+      throw new DatabaseError('find active session by deposit address', error instanceof Error ? error : undefined);
+    }
+  }
+
   async findConfirmedAwaitingSettlement(limit: number = 500): Promise<PaymentSession[]> {
     const pool = (await import('../../../lib/mysql')).default;
 
