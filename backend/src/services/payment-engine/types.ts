@@ -77,6 +77,7 @@ export interface CreatePaymentInput {
   network?: Network; // Optional for request type (provided at fulfillment)
   payer?: PayerInput; // Optional for request type
   receiver?: ReceiverInput;
+  receiverId?: number;
   merchantId?: string;
   merchantReference?: string;
   callbackUrl?: string;

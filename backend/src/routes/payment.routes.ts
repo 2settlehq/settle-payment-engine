@@ -70,6 +70,7 @@ router.post(
     // bankName and accountName are always resolved server-side — never trusted from client.
     // Sandbox keys skip real NUBAN verification — use placeholder values.
     let resolvedReceiver: { bankCode: string; accountNumber: string; accountName: string; bankName: string } | undefined;
+    let receiverId: number | undefined;
     if (input.receiver) {
       if (apiKey?.isSandbox) {
         resolvedReceiver = {
@@ -84,6 +85,15 @@ router.post(
           input.receiver.accountNumber
         );
       }
+
+      receiverId = await participantService.getOrCreateReceiver({
+        bankCode: resolvedReceiver.bankCode,
+        accountNumber: resolvedReceiver.accountNumber,
+        accountName: resolvedReceiver.accountName,
+        bankName: resolvedReceiver.bankName,
+        phone: input.receiver.phone,
+        walletAddress: input.receiver.walletAddress,
+      });
     }
 
     // Create payment session via PaymentEngine
@@ -104,7 +114,10 @@ router.post(
         accountNumber: resolvedReceiver.accountNumber,
         accountName: resolvedReceiver.accountName,
         bankName: resolvedReceiver.bankName,
+        phone: input.receiver?.phone,
+        walletAddress: input.receiver?.walletAddress,
       } : undefined,
+      receiverId,
       merchantId: input.merchantId,
       merchantReference: input.merchantReference,
       callbackUrl: input.callbackUrl,
@@ -122,16 +135,6 @@ router.post(
     if (input.payer) {
       const payerId = await participantService.getOrCreatePayer(input.payer);
       await paymentEngine.setPayerId(session.id, payerId);
-    }
-
-    if (resolvedReceiver) {
-      const receiverId = await participantService.getOrCreateReceiver({
-        bankCode: resolvedReceiver.bankCode,
-        accountNumber: resolvedReceiver.accountNumber,
-        accountName: resolvedReceiver.accountName,
-        bankName: resolvedReceiver.bankName,
-      } as any);
-      await paymentEngine.setReceiverId(session.id, receiverId);
     }
 
     // Auto-settle: record the payment as settled immediately.

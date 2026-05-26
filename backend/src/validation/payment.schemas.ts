@@ -46,6 +46,7 @@ export const receiverInputSchema = z.object({
   bankCode: z.string().min(1, 'Bank code is required'),
   accountNumber: z.string().min(1, 'Account number is required'),
   phone: z.string().optional(),
+  walletAddress: z.string().optional(),
 });
 
 // =============================================================================
