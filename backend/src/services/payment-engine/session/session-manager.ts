@@ -20,6 +20,7 @@ import { lockRate } from '../rate';
 import { calculateCharges, calculateChargesFromCrypto } from '../charges';
 import { assignWallet, releaseWallet } from '../wallet';
 import { getHDWalletService } from '../hd-wallet';
+import { participantService } from '../participant/participant.service';
 import { SessionRepository, sessionRepository, UpdateSessionData, CreateSessionData } from './session-repository';
 import { getDepositWatcher } from '../watcher';
 
@@ -285,11 +286,36 @@ export class SessionManager {
     let expiresAt: Date;
 
     if (hdWallet?.isEnabled()) {
-      // Use HD wallet derivation
-      const derivation = await hdWallet.deriveNextAddress(resolvedInput.network!);
-      depositAddress = derivation.address;
-      derivationIndex = derivation.derivationIndex;
-      hdChain = derivation.chain;
+      const receiverWallet = resolvedInput.receiverId
+        ? await participantService.getReceiverChainWallet(
+            resolvedInput.receiverId,
+            resolvedInput.network!
+          )
+        : null;
+
+      if (receiverWallet) {
+        depositAddress = receiverWallet.address;
+        derivationIndex = receiverWallet.derivationIndex;
+        hdChain = receiverWallet.hdChain;
+      } else {
+        const derivation = await hdWallet.deriveNextAddress(resolvedInput.network!);
+        depositAddress = derivation.address;
+        derivationIndex = derivation.derivationIndex;
+        hdChain = derivation.chain;
+
+        if (resolvedInput.receiverId) {
+          await participantService.saveReceiverChainWallet(
+            resolvedInput.receiverId,
+            resolvedInput.network!,
+            {
+              address: derivation.address,
+              derivationIndex: derivation.derivationIndex,
+              hdChain: derivation.chain,
+            }
+          );
+        }
+      }
+
       expiresAt = new Date(Date.now() + this.config.sessionTtlMinutes * 60 * 1000);
     } else {
       // Fall back to legacy wallet pool
