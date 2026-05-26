@@ -6,7 +6,7 @@
  * before being written to the database.
  */
 
-import { PayerInput, ReceiverInput } from '../types';
+import { HDChain, Network, PayerInput, ReceiverInput } from '../types';
 import { bankService, ResolvedAccount } from '../../bank/bank.service';
 
 // =============================================================================
@@ -25,6 +25,48 @@ export interface ReceiverRecord {
   bankAccount: string;
   accountName: string;
   phone?: string;
+  walletAddress?: string;
+}
+
+export interface ReceiverChainWallet {
+  address: string;
+  derivationIndex: number;
+  hdChain: HDChain;
+}
+
+type ReceiverWalletColumnSet = {
+  hdChain: HDChain;
+  addressColumn: string;
+  derivationIndexColumn: string;
+};
+
+function getReceiverWalletColumns(network: Network): ReceiverWalletColumnSet {
+  switch (network) {
+    case 'bitcoin':
+      return {
+        hdChain: 'bitcoin',
+        addressColumn: 'bitcoin_wallet_address',
+        derivationIndexColumn: 'bitcoin_derivation_index',
+      };
+    case 'tron':
+    case 'trc20':
+      return {
+        hdChain: 'tron',
+        addressColumn: 'tron_wallet_address',
+        derivationIndexColumn: 'tron_derivation_index',
+      };
+    case 'ethereum':
+    case 'erc20':
+    case 'bsc':
+    case 'bep20':
+    case 'polygon':
+    case 'base':
+      return {
+        hdChain: 'ethereum',
+        addressColumn: 'ethereum_wallet_address',
+        derivationIndexColumn: 'ethereum_derivation_index',
+      };
+  }
 }
 
 // =============================================================================
@@ -77,6 +119,15 @@ export class ParticipantService {
     const pool = (await import('../../../lib/mysql')).default;
 
     try {
+      const receiverByIdentity = await this.findReceiverIdByReusableIdentity({
+        phone: receiver.phone,
+        walletAddress: receiver.walletAddress,
+      });
+
+      if (receiverByIdentity) {
+        return receiverByIdentity;
+      }
+
       // Look up by account number + bank code (unique combination)
       const [rows] = await pool.query(
         `SELECT id FROM receivers
@@ -90,14 +141,15 @@ export class ParticipantService {
       }
 
       const [result] = await pool.query(
-        `INSERT INTO receivers (bank_account, bank_code, bank_name, account_name, phone)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO receivers (bank_account, bank_code, bank_name, account_name, phone, wallet_address)
+         VALUES (?, ?, ?, ?, ?, ?)`,
         [
           receiver.accountNumber,
           receiver.bankCode,
           receiver.bankName ?? null,
           receiver.accountName,
           receiver.phone || null,
+          receiver.walletAddress || null,
         ]
       ) as [any, any];
 
@@ -106,6 +158,95 @@ export class ParticipantService {
       console.error('[ParticipantService] Receiver error:', error.message, error.code);
       throw error;
     }
+  }
+
+  /**
+   * Find an existing receiver by reusable identity.
+   * Phone is preferred when both phone and walletAddress are provided.
+   */
+  async findReceiverIdByReusableIdentity(identity: {
+    phone?: string | null;
+    walletAddress?: string | null;
+  }): Promise<number | null> {
+    const pool = (await import('../../../lib/mysql')).default;
+    const phone = identity.phone?.trim() || null;
+    const walletAddress = identity.walletAddress?.trim() || null;
+
+    if (!phone && !walletAddress) {
+      return null;
+    }
+
+    const clauses: string[] = [];
+    const values: any[] = [];
+
+    if (phone) {
+      clauses.push('phone = ?');
+      values.push(phone);
+    }
+
+    if (walletAddress) {
+      clauses.push('wallet_address = ?');
+      values.push(walletAddress);
+    }
+
+    const [rows] = await pool.query(
+      `SELECT id
+       FROM receivers
+       WHERE ${clauses.join(' OR ')}
+       ORDER BY CASE WHEN phone = ? THEN 0 ELSE 1 END
+       LIMIT 1`,
+      [...values, phone]
+    ) as [any[], any];
+
+    if (!rows || rows.length === 0) {
+      return null;
+    }
+
+    return Number(rows[0].id);
+  }
+
+  async getReceiverChainWallet(
+    receiverId: number,
+    network: Network
+  ): Promise<ReceiverChainWallet | null> {
+    const pool = (await import('../../../lib/mysql')).default;
+    const columns = getReceiverWalletColumns(network);
+
+    const [rows] = await pool.query(
+      `SELECT ${columns.addressColumn} AS address,
+              ${columns.derivationIndexColumn} AS derivation_index
+       FROM receivers
+       WHERE id = ?
+       LIMIT 1`,
+      [receiverId]
+    ) as [any[], any];
+
+    if (!rows || rows.length === 0 || !rows[0].address || rows[0].derivation_index == null) {
+      return null;
+    }
+
+    return {
+      address: rows[0].address,
+      derivationIndex: Number(rows[0].derivation_index),
+      hdChain: columns.hdChain,
+    };
+  }
+
+  async saveReceiverChainWallet(
+    receiverId: number,
+    network: Network,
+    wallet: ReceiverChainWallet
+  ): Promise<void> {
+    const pool = (await import('../../../lib/mysql')).default;
+    const columns = getReceiverWalletColumns(network);
+
+    await pool.query(
+      `UPDATE receivers
+       SET ${columns.addressColumn} = ?,
+           ${columns.derivationIndexColumn} = ?
+       WHERE id = ?`,
+      [wallet.address, wallet.derivationIndex, receiverId]
+    );
   }
 
   /**
@@ -135,7 +276,7 @@ export class ParticipantService {
     const pool = (await import('../../../lib/mysql')).default;
 
     const [rows] = await pool.query(
-      `SELECT id, bank_name, bank_account, account_name, phone
+      `SELECT id, bank_code, bank_name, bank_account, account_name, phone, wallet_address
        FROM receivers WHERE id = ?`,
       [receiverId]
     ) as [any[], any];
@@ -148,6 +289,7 @@ export class ParticipantService {
       bankAccount: rows[0].bank_account,
       accountName: rows[0].account_name,
       phone: rows[0].phone || undefined,
+      walletAddress: rows[0].wallet_address || undefined,
     };
   }
 
@@ -165,7 +307,6 @@ export class ParticipantService {
       fields.push('phone = ?');
       values.push(updates.phone);
     }
-
     if (fields.length === 0) return;
 
     values.push(payerId);
@@ -197,6 +338,10 @@ export class ParticipantService {
     if (updates.phone !== undefined) {
       fields.push('phone = ?');
       values.push(updates.phone);
+    }
+    if (updates.walletAddress !== undefined) {
+      fields.push('wallet_address = ?');
+      values.push(updates.walletAddress);
     }
 
     if (fields.length === 0) return;

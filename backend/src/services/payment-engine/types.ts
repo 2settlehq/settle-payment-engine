@@ -64,6 +64,7 @@ export interface ReceiverInput {
   accountName: string;
   bankName?: string;
   phone?: string;
+  walletAddress?: string;
 }
 
 export interface CreatePaymentInput {
