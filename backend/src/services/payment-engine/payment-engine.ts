@@ -374,9 +374,10 @@ export class PaymentEngine {
   async fulfillRequest(
     paymentId: string,
     crypto: string,
-    network: string
+    network: string,
+    sessionOwnerId?: number
   ): Promise<PaymentSession> {
-    return this.manager.fulfillRequest(paymentId, crypto, network);
+    return this.manager.fulfillRequest(paymentId, crypto, network, sessionOwnerId);
   }
 }
 

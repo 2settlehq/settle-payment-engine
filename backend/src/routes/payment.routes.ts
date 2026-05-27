@@ -507,11 +507,19 @@ router.post(
         });
       }
 
+      const sessionOwnerId = await sessionOwnerService.getOrCreateSessionOwner({
+        ownerScope: getSessionOwnerScope(req.apiKey?.id),
+        ownerRef: parsed.data.payer.chatId,
+        phone: parsed.data.payer.phone,
+        walletAddress: parsed.data.payer.walletAddress,
+      });
+
       // Fulfill request - this locks rate, calculates crypto amount, assigns wallet
       const fulfilledSession = await paymentEngine.fulfillRequest(
         session.id,
         parsed.data.crypto,
-        parsed.data.network
+        parsed.data.network,
+        sessionOwnerId
       );
 
       // Create/get payer and link to session

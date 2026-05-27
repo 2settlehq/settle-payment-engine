@@ -21,7 +21,6 @@ import { lockRate } from '../rate';
 import { calculateCharges, calculateChargesFromCrypto } from '../charges';
 import { assignWallet, releaseWallet } from '../wallet';
 import { getHDWalletService } from '../hd-wallet';
-import { participantService } from '../participant/participant.service';
 import { sessionOwnerService } from '../session-owner';
 import { SessionRepository, sessionRepository, UpdateSessionData, CreateSessionData } from './session-repository';
 import { getDepositWatcher } from '../watcher';
@@ -660,7 +659,8 @@ export class SessionManager {
   async fulfillRequest(
     sessionId: string,
     crypto: string,
-    network: string
+    network: string,
+    sessionOwnerId?: number
   ): Promise<PaymentSession> {
     const session = await this.getSession(sessionId);
 
@@ -705,17 +705,17 @@ export class SessionManager {
     let expiresAt: Date;
 
     if (hdWallet?.isEnabled()) {
-      const receiverWallet = session.receiverId
-        ? await participantService.getReceiverChainWallet(
-            session.receiverId,
+      const ownerWallet = sessionOwnerId
+        ? await sessionOwnerService.getSessionOwnerChainWallet(
+            sessionOwnerId,
             network as any
           )
         : null;
 
-      if (receiverWallet) {
-        depositAddress = receiverWallet.address;
-        derivationIndex = receiverWallet.derivationIndex;
-        hdChain = receiverWallet.hdChain;
+      if (ownerWallet) {
+        depositAddress = ownerWallet.address;
+        derivationIndex = ownerWallet.derivationIndex;
+        hdChain = ownerWallet.hdChain;
         await this.assertDepositAddressAvailable(depositAddress, sessionId);
       } else {
         const derivation = await hdWallet.deriveNextAddress(network as any);
@@ -723,9 +723,9 @@ export class SessionManager {
         derivationIndex = derivation.derivationIndex;
         hdChain = derivation.chain;
 
-        if (session.receiverId) {
-          await participantService.saveReceiverChainWallet(
-            session.receiverId,
+        if (sessionOwnerId) {
+          await sessionOwnerService.saveSessionOwnerChainWallet(
+            sessionOwnerId,
             network as any,
             {
               address: derivation.address,
@@ -758,6 +758,7 @@ export class SessionManager {
       chargeAmount: charges.fiatCharge,
       chargeFrom: charges.chargeFrom,
       transactionUsd: rateLock.rate ? charges.netFiatAmount / rateLock.rate : undefined,
+      sessionOwnerId,
       depositAddress,
       walletId,
       derivationIndex,

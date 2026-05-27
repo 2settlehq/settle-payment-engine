@@ -54,6 +54,7 @@ export interface UpdateSessionData {
   settledAt?: Date;
   payerId?: number;
   receiverId?: number;
+  sessionOwnerId?: number;
   cashbackAmount?: number;
   cashbackCredited?: boolean;
   // Fields for request fulfillment
@@ -372,6 +373,10 @@ export class SessionRepository {
     if (data.receiverId !== undefined) {
       updates.push('receiver_id = ?');
       values.push(data.receiverId);
+    }
+    if (data.sessionOwnerId !== undefined) {
+      updates.push('session_owner_id = ?');
+      values.push(data.sessionOwnerId);
     }
     if (data.cashbackAmount !== undefined) {
       updates.push('cashback_amount = ?');
