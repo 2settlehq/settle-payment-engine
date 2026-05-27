@@ -8,9 +8,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SessionManager } from '@/services/payment-engine/session/session-manager';
 import {
+  DepositAddressInUseError,
   InvalidInputError,
   InvalidSessionStateError,
-  ReceiverWalletInUseError,
   SessionNotFoundError,
   UnsupportedCryptoNetworkError,
 } from '@/services/payment-engine/errors';
@@ -343,7 +343,7 @@ describe('SessionManager', () => {
       }));
 
       await expect(manager.createSession({ ...validInput, receiverId: 42, sessionOwnerId: 7 }))
-        .rejects.toThrow(ReceiverWalletInUseError);
+        .rejects.toThrow(DepositAddressInUseError);
       expect(mockRepo.create).not.toHaveBeenCalled();
     });
 
@@ -624,6 +624,21 @@ describe('SessionManager', () => {
         expect(updated.status).toBe('expired');
       });
 
+      it('should not release a reusable HD wallet when cancelling', async () => {
+        const mockSession = createMockSession({
+          status: 'pending',
+          derivationIndex: 0,
+          hdChain: 'ethereum',
+          expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+        });
+        mockRepo._addSession(mockSession);
+        const { releaseWallet } = await import('@/services/payment-engine/wallet');
+
+        await manager.cancelSession(mockSession.id);
+
+        expect(releaseWallet).not.toHaveBeenCalled();
+      });
+
       it('should reject an already expired pending session', async () => {
         const mockSession = createMockSession({
           status: 'pending',
@@ -787,7 +802,7 @@ describe('SessionManager', () => {
       }));
 
       await expect(manager.fulfillRequest(requestSession.id, 'USDT', 'bep20', 7))
-        .rejects.toThrow(ReceiverWalletInUseError);
+        .rejects.toThrow(DepositAddressInUseError);
       expect(mockRepo.update).not.toHaveBeenCalled();
     });
   });

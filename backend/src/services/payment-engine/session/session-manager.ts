@@ -10,9 +10,9 @@ import {
   PaymentEngineConfig,
 } from '../types';
 import {
+  DepositAddressInUseError,
   InvalidInputError,
   InvalidSessionStateError,
-  ReceiverWalletInUseError,
   SessionNotFoundError,
   UnsupportedCryptoNetworkError,
 } from '../errors';
@@ -133,6 +133,12 @@ function isValidTransition(from: PaymentStatus, to: PaymentStatus): boolean {
   return VALID_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
+function usesLegacyWalletPool(
+  session: PaymentSession
+): session is PaymentSession & { walletId: number; network: NonNullable<PaymentSession['network']> } {
+  return Boolean(session.walletId && session.derivationIndex === undefined && session.network);
+}
+
 export class SessionManager {
   private repository: SessionRepository;
   private config: PaymentEngineConfig;
@@ -155,7 +161,7 @@ export class SessionManager {
     );
 
     if (activeSession) {
-      throw new ReceiverWalletInUseError(depositAddress, activeSession.id);
+      throw new DepositAddressInUseError(depositAddress, activeSession.id);
     }
   }
 
@@ -478,7 +484,7 @@ export class SessionManager {
     }
 
     // Only release wallet if using legacy wallet pool (not HD wallet)
-    if (session.walletId && !session.derivationIndex && session.network) {
+    if (usesLegacyWalletPool(session)) {
       await releaseWallet(session.walletId, session.network);
     }
 
@@ -562,8 +568,8 @@ export class SessionManager {
       );
     }
 
-    // Only release wallet if using legacy wallet pool (not HD wallet) and has network
-    if (session.walletId && !session.derivationIndex && session.network) {
+    // Only release wallet if using legacy wallet pool (not HD wallet)
+    if (usesLegacyWalletPool(session)) {
       await releaseWallet(session.walletId, session.network);
     }
 
@@ -607,9 +613,9 @@ export class SessionManager {
       );
     }
 
-    // Only release wallet if using legacy wallet pool (not HD wallet) and has network
+    // Only release wallet if using legacy wallet pool (not HD wallet)
     if ((session.status === 'pending' || session.status === 'confirming') &&
-        session.walletId && !session.derivationIndex && session.network) {
+        usesLegacyWalletPool(session)) {
       await releaseWallet(session.walletId, session.network);
     }
 
