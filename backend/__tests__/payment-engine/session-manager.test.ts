@@ -295,6 +295,7 @@ describe('SessionManager', () => {
       expect(sessionOwnerServiceMock.getSessionOwnerChainWallet).toHaveBeenCalledWith(7, 'bep20');
       expect(mockRepo.findActiveByDepositAddress).toHaveBeenCalledWith(
         '0xReusableReceiverWallet',
+        'USDT',
         undefined
       );
       expect(hdWallet.deriveNextAddress).not.toHaveBeenCalled();
@@ -330,7 +331,7 @@ describe('SessionManager', () => {
       }));
     });
 
-    it('should reject a reused session owner wallet assigned to another active session', async () => {
+    it('should reject a reused session owner wallet assigned to another active session for the same asset', async () => {
       enableHDWallet();
       sessionOwnerServiceMock.getSessionOwnerChainWallet.mockResolvedValue({
         address: '0xReusableReceiverWallet',
@@ -344,6 +345,11 @@ describe('SessionManager', () => {
 
       await expect(manager.createSession({ ...validInput, receiverId: 42, sessionOwnerId: 7 }))
         .rejects.toThrow(DepositAddressInUseError);
+      expect(mockRepo.findActiveByDepositAddress).toHaveBeenCalledWith(
+        '0xReusableReceiverWallet',
+        'USDT',
+        undefined
+      );
       expect(mockRepo.create).not.toHaveBeenCalled();
     });
 
@@ -731,6 +737,7 @@ describe('SessionManager', () => {
       expect(sessionOwnerServiceMock.getSessionOwnerChainWallet).toHaveBeenCalledWith(7, 'bep20');
       expect(mockRepo.findActiveByDepositAddress).toHaveBeenCalledWith(
         '0xReusableReceiverWallet',
+        'USDT',
         requestSession.id
       );
       expect(hdWallet.deriveNextAddress).not.toHaveBeenCalled();
@@ -775,7 +782,7 @@ describe('SessionManager', () => {
       expect(updated.sessionOwnerId).toBe(7);
     });
 
-    it('should reject request fulfillment when the reused session owner wallet has an active session', async () => {
+    it('should reject request fulfillment when the reused session owner wallet has an active session for the same asset', async () => {
       enableHDWallet();
       const requestSession = createMockSession({
         id: 'pay_request',
@@ -803,6 +810,11 @@ describe('SessionManager', () => {
 
       await expect(manager.fulfillRequest(requestSession.id, 'USDT', 'bep20', 7))
         .rejects.toThrow(DepositAddressInUseError);
+      expect(mockRepo.findActiveByDepositAddress).toHaveBeenCalledWith(
+        '0xReusableReceiverWallet',
+        'USDT',
+        requestSession.id
+      );
       expect(mockRepo.update).not.toHaveBeenCalled();
     });
   });

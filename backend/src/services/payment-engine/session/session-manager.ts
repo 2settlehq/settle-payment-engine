@@ -153,10 +153,12 @@ export class SessionManager {
 
   private async assertDepositAddressAvailable(
     depositAddress: string,
+    crypto?: PaymentSession['crypto'],
     excludeSessionId?: string
   ): Promise<void> {
     const activeSession = await this.repository.findActiveByDepositAddress(
       depositAddress,
+      crypto,
       excludeSessionId
     );
 
@@ -319,7 +321,7 @@ export class SessionManager {
         depositAddress = ownerWallet.address;
         derivationIndex = ownerWallet.derivationIndex;
         hdChain = ownerWallet.hdChain;
-        await this.assertDepositAddressAvailable(depositAddress);
+        await this.assertDepositAddressAvailable(depositAddress, resolvedInput.crypto);
       } else {
         const derivation = await hdWallet.deriveNextAddress(resolvedInput.network!);
         depositAddress = derivation.address;
@@ -722,7 +724,7 @@ export class SessionManager {
         depositAddress = ownerWallet.address;
         derivationIndex = ownerWallet.derivationIndex;
         hdChain = ownerWallet.hdChain;
-        await this.assertDepositAddressAvailable(depositAddress, sessionId);
+        await this.assertDepositAddressAvailable(depositAddress, crypto as any, sessionId);
       } else {
         const derivation = await hdWallet.deriveNextAddress(network as any);
         depositAddress = derivation.address;

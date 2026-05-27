@@ -257,13 +257,19 @@ export class SessionRepository {
 
   async findActiveByDepositAddress(
     depositAddress: string,
+    crypto?: CryptoCurrency,
     excludeSessionId?: string
   ): Promise<PaymentSession | null> {
     const pool = (await import('../../../lib/mysql')).default;
 
     try {
       const values: any[] = [depositAddress];
+      const cryptoClause = crypto ? 'AND crypto = ?' : '';
       const excludeClause = excludeSessionId ? 'AND id <> ?' : '';
+
+      if (crypto) {
+        values.push(crypto);
+      }
 
       if (excludeSessionId) {
         values.push(excludeSessionId);
@@ -272,6 +278,7 @@ export class SessionRepository {
       const [rows] = await pool.query<any[]>(
         `SELECT * FROM payment_sessions
          WHERE deposit_address = ?
+           ${cryptoClause}
            ${excludeClause}
            AND (
              (status = 'pending' AND expires_at > NOW())
