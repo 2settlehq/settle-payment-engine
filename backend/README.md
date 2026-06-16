@@ -801,13 +801,13 @@ Use the gift generator to create paid gift records directly in the database. The
 Dry run:
 
 ```bash
-pnpm run generate:gift-ids -- --count 10 --amount 5000 --db settle_db_test --host 127.0.0.1 --port 3306 --user root --password mosnyik
+pnpm run generate:gift-ids -- --count 10 --amount 5000 --db settle_db_test --host 127.0.0.1 --port 3306 --user root --password PASSWORD
 ```
 
 Apply changes:
 
 ```bash
-pnpm run generate:gift-ids -- --count 10 --amount 5000 --db settle_db_test --host 127.0.0.1 --port 3306 --user root --password mosnyik --apply
+pnpm run generate:gift-ids -- --count 10 --amount 5000 --db settle_db_test --host 127.0.0.1 --port 3306 --user root --password PASSWORD --apply
 ```
 
 Arguments:
