@@ -124,6 +124,11 @@ export const config = {
     secret: process.env.ADMIN_SECRET || "", // Required for admin endpoints
   },
 
+  // Reportly (Complaint Reporting) configuration
+  reportly: {
+    adminWebhookUrl: process.env.REPORTLY_ADMIN_WEBHOOK_URL || "",
+  },
+
   // HD Wallet configuration
   hdWallet: {
     enabled: process.env.HD_WALLET_ENABLED === "true",
@@ -219,6 +224,8 @@ export const config = {
       "/v1/webhooks/*",
       "/v1/auth/*",
       "/v1/payments/:reference",
+      "/v1/reports/lookup",
+      "/v1/reports/:reportId",
     ],
   },
 };

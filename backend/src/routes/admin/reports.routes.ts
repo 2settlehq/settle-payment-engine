@@ -1,6 +1,16 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { pool } from '../../lib/mysql';
 import { RowDataPacket } from 'mysql2';
+import {
+  getAllReports,
+  getReportByReportId,
+  updateReport,
+} from '../../services/report';
+import {
+  adminQueryReportsSchema,
+  updateReportSchema,
+  reportIdParamSchema,
+} from '../../validation/report.schemas';
 
 const router = Router();
 
@@ -252,5 +262,89 @@ router.get('/reconciliation', async (req: Request, res: Response, next: NextFunc
 // MERCHANT — OWN SETTLEMENTS REPORT
 // Already handled in me.routes.ts, kept in admin for reference only
 // =============================================================================
+
+// =============================================================================
+// COMPLAINT REPORTS — ADMIN MANAGEMENT
+// =============================================================================
+
+/**
+ * GET /v1/admin/reports/complaints
+ *
+ * List all complaint reports with filters.
+ * Query params: status, complaintType, merchantId, apiKeyId, from, to, search, limit, offset
+ */
+router.get('/complaints', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = adminQueryReportsSchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
+    }
+
+    const { reports, total } = await getAllReports(parsed.data);
+
+    return res.json({
+      status: true,
+      data: {
+        reports,
+        total,
+        limit: parsed.data.limit,
+        offset: parsed.data.offset,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /v1/admin/reports/complaints/:reportId
+ *
+ * Get a single complaint report by ID.
+ */
+router.get('/complaints/:reportId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const paramParsed = reportIdParamSchema.safeParse(req.params);
+    if (!paramParsed.success) {
+      return res.status(400).json({ error: 'Invalid report ID format', details: paramParsed.error.flatten() });
+    }
+
+    const report = await getReportByReportId(paramParsed.data.reportId);
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found', code: 'NOT_FOUND' });
+    }
+
+    return res.json({ status: true, data: { report } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PATCH /v1/admin/reports/complaints/:reportId
+ *
+ * Update a complaint report's status, confirmer, or admin notes.
+ */
+router.patch('/complaints/:reportId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const paramParsed = reportIdParamSchema.safeParse(req.params);
+    if (!paramParsed.success) {
+      return res.status(400).json({ error: 'Invalid report ID format', details: paramParsed.error.flatten() });
+    }
+
+    const bodyParsed = updateReportSchema.safeParse(req.body);
+    if (!bodyParsed.success) {
+      return res.status(400).json({ error: 'Validation failed', details: bodyParsed.error.flatten() });
+    }
+
+    const report = await updateReport(paramParsed.data.reportId, bodyParsed.data);
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found', code: 'NOT_FOUND' });
+    }
+
+    return res.json({ status: true, data: { report } });
+  } catch (err) {
+    next(err);
+  }
+});
 
 export default router;
