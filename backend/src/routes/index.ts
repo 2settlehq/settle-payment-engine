@@ -15,6 +15,7 @@ import meRoutes from './me.routes';
 import historyRoutes from './history.routes';
 import webhookRoutes from './webhook.routes';
 import sandboxRoutes from './sandbox.routes';
+import reportRoutes from './report.routes';
 import {
   deprecateTransferRoutes,
   deprecateGiftRoutes,
@@ -42,6 +43,11 @@ router.use('/transfer', deprecateTransferRoutes, transferRoutes);
 router.use('/gifts', deprecateGiftRoutes, giftRoutes);
 router.use('/requests', deprecateRequestRoutes, requestRoutes);
 router.use('/transaction', deprecateTransactionRoutes, transactionRoutes);
+
+// =============================================================================
+// REPORT ROUTES (complaint/fraud reporting)
+// =============================================================================
+router.use('/reports', reportRoutes);
 
 // =============================================================================
 // OTHER ROUTES
