@@ -256,7 +256,6 @@ This means **there is currently no live automatic settlement provider configured
 | **Monnify (Moniepoint)** | Moniepoint's payment gateway. Supports NGN bank transfers, reserved accounts, and disbursements. High reliability, widely used in Nigeria. Strong API docs. |
 | **Flutterwave** | Supports Nigerian bank transfers, mobile money, and international payouts. Well-documented API. Strong alternative. |
 | **Korapay** | Nigerian fintech focused on payments infrastructure. Supports bank transfers, competitive fees. |
-| **Bloc (getbloc.co)** | Banking-as-a-service. Offers direct bank transfers, virtual accounts, and card issuance. |
 | **Fincra** | Pan-African payment infrastructure. Supports NGN payouts, collections, and cross-border transfers. |
 | **Budpay** | Nigerian payment gateway with transfer/payout capabilities. API-first approach. |
 | **Busha** | SEC-licensed Nigerian crypto infrastructure platform. API supports crypto-to-fiat conversion and direct NGN bank transfer payouts in one step. Also covers KES, GHS, UGX, TZS, XOF, RWF. |
@@ -436,7 +435,7 @@ Crypto In (HD Wallet)
     → Transfer to Exchange
       → Sell Order (limit/market)
         → NGN in Exchange Account
-          → Withdraw to Mongoro/Bank
+          → Withdraw to central Bank
 ```
 
 ### 5.2. Direct Bank Integration (Bypassing Mongoro)
@@ -445,7 +444,7 @@ Crypto In (HD Wallet)
 
 **Options:**
 - Partner with a bank directly (e.g., Providus, Wema/ALAT) for direct NIP transfers.
-- Use a BaaS provider like Bloc or Anchor for direct bank connectivity.
+- Use a BaaS provider (e.g., Anchor, Fincra) for direct bank connectivity.
 - Apply for a Payment Service Provider (PSP) license to operate your own settlement rail.
 
 **Benefits:** Lower fees, faster settlement, no balance pre-funding, no third-party downtime dependency.
