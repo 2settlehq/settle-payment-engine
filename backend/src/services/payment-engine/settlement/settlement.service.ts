@@ -2,14 +2,15 @@
  * Settlement Service
  *
  * Orchestrates fiat payout after crypto deposit confirmation.
- * Uses Mongoro for bank transfers with Telegram fallback for failures.
+ * Dispatches to a SettlementProvider via SettlementRouter (balance-aware
+ * provider selection), with Telegram fallback when no provider can cover it.
  */
 
 import crypto from 'crypto';
 import config from '../../../config';
 import { pool } from '../../../lib/mysql';
-import { MongoroService, mongoroService } from './mongoro.service';
 import { TelegramService, telegramService, SessionAlertData } from './telegram.service';
+import { SettlementRouter, settlementRouter, SettlementDispatchResult } from './settlement-router';
 import { sendPaymentWebhook } from '../payment-webhook.service';
 import {
   SettlementConfig,
@@ -51,16 +52,16 @@ interface SessionRow extends RowDataPacket {
 
 export class SettlementService {
   private readonly config: SettlementConfig;
-  private readonly mongoro: MongoroService;
+  private readonly router: SettlementRouter;
   private readonly telegram: TelegramService;
 
   constructor(
     settlementConfig: SettlementConfig = config.settlement,
-    mongoroSvc: MongoroService = mongoroService,
+    router: SettlementRouter = settlementRouter,
     telegramSvc: TelegramService = telegramService
   ) {
     this.config = settlementConfig;
-    this.mongoro = mongoroSvc;
+    this.router = router;
     this.telegram = telegramSvc;
   }
 
@@ -155,49 +156,59 @@ export class SettlementService {
 
     const narration = `2Settle ${session.reference}`;
 
-    // 5. Mongoro mode: create attempt record
-    const attemptData: CreateSettlementAttemptData = {
+    // 5. Route to whichever enabled provider has enough balance to cover this
+    // payout, preferring the one with the highest balance. Falls through to
+    // the next-best provider if the transfer itself fails.
+    let dispatch: SettlementDispatchResult;
+    try {
+      dispatch = await this.router.dispatch({
+        sessionId,
+        amount: payoutFiatAmount,
+        currency: session.fiat_currency,
+        accountNumber: receiver.accountNumber,
+        bankCode: receiver.bankCode,
+        accountName: receiver.accountName,
+        bankName: receiver.bankName,
+        narration,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No settlement provider available';
+
+      await this.createSettlementAttempt({
+        sessionId,
+        provider: 'none',
+        status: 'failed',
+        amount: payoutFiatAmount,
+        accountNumber: receiver.accountNumber,
+        bankCode: receiver.bankCode,
+        accountName: receiver.accountName,
+        errorMessage: message,
+      });
+
+      await this.handleSettlementFailure(session, receiver, message);
+      return;
+    }
+
+    const { provider, result } = dispatch;
+
+    await this.createSettlementAttempt({
       sessionId,
-      provider: 'mongoro',
-      status: 'pending',
+      provider,
+      status: result.success ? 'pending' : 'failed', // pending: still awaiting webhook confirmation
       amount: payoutFiatAmount,
       accountNumber: receiver.accountNumber,
       bankCode: receiver.bankCode,
       accountName: receiver.accountName,
-    };
+      reference: result.reference,
+      responsePayload: result.raw,
+      errorMessage: result.success ? undefined : result.message,
+    });
 
-    const attemptId = await this.createSettlementAttempt(attemptData);
-
-    // 6. Call Mongoro API
-    const response = await this.mongoro.transfer(
-      receiver.accountNumber,
-      receiver.bankCode,
-      receiver.bankName || receiver.bankCode,
-      receiver.accountName,
-      payoutFiatAmount,
-      narration,
-      session.fiat_currency
-    );
-
-    // 7. Handle response
-    if (response.success && response.data?.reference) {
-      await this.updateSettlementAttempt(attemptId, {
-        status: 'pending', // Still pending until webhook confirms
-        reference: response.data.reference,
-        responsePayload: response.data as unknown as Record<string, unknown>,
-      });
-
-      await this.updateSessionSettlement(sessionId, response.data.reference, 'mongoro');
-
-      console.log(`[Settlement] Initiated for ${session.reference}, ref: ${response.data.reference}`);
+    if (result.success && result.reference) {
+      await this.updateSessionSettlement(sessionId, result.reference, provider);
+      console.log(`[Settlement] Initiated for ${session.reference} via ${provider}, ref: ${result.reference}`);
     } else {
-      await this.updateSettlementAttempt(attemptId, {
-        status: 'failed',
-        errorMessage: response.message,
-        responsePayload: response as unknown as Record<string, unknown>,
-      });
-
-      await this.handleSettlementFailure(session, receiver, response.message);
+      await this.handleSettlementFailure(session, receiver, result.message);
     }
   }
 
