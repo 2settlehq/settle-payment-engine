@@ -6,7 +6,7 @@
   "scripts": {
     "copy:missing-settled-payment-sessions": "node scripts/copy-missing-settled-payment-sessions.js",
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-assets.js",
     "generate:gift-ids": "tsx scripts/generate-gift-ids.ts",
     "recover": "tsx scripts/recover-stuck-hd-sweep.ts",
     "recover:hd-sweep": "tsx scripts/recover-stuck-hd-sweep.ts",

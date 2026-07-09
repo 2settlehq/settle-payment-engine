@@ -2,9 +2,14 @@
  * Email OTP Provider (SMTP via nodemailer)
  */
 
+import fs from 'fs';
+import path from 'path';
 import nodemailer, { Transporter } from 'nodemailer';
 import config from '../../../../config';
 import { OtpDeliveryProvider } from './types';
+import { buildOtpEmailHtml, LOGO_CID } from './email.template';
+
+const LOGO_PATH = path.join(__dirname, '../../../../assets/logo.png');
 
 let transporter: Transporter | null = null;
 
@@ -44,7 +49,10 @@ export const emailOtpProvider: OtpDeliveryProvider = {
       to: identifier,
       subject: 'Your 2Settle login code',
       text: `Your login code is ${code}. It expires in ${minutes} minutes.`,
-      html: `<p>Your login code is <strong>${code}</strong>. It expires in ${minutes} minutes.</p>`,
+      html: buildOtpEmailHtml(code, minutes),
+      attachments: fs.existsSync(LOGO_PATH)
+        ? [{ filename: 'logo.png', path: LOGO_PATH, cid: LOGO_CID }]
+        : [],
     });
   },
 };
