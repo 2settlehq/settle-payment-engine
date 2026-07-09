@@ -38,11 +38,13 @@ export const emailOtpProvider: OtpDeliveryProvider = {
   },
 
   async send(identifier: string, code: string): Promise<void> {
+    const minutes = Math.round(config.auth.otp.expiresInSec / 60);
     await getTransporter().sendMail({
       from: config.auth.email.fromAddress,
       to: identifier,
       subject: 'Your 2Settle login code',
-      text: `Your login code is ${code}. It expires in ${Math.round(config.auth.otp.expiresInSec / 60)} minutes.`,
+      text: `Your login code is ${code}. It expires in ${minutes} minutes.`,
+      html: `<p>Your login code is <strong>${code}</strong>. It expires in ${minutes} minutes.</p>`,
     });
   },
 };

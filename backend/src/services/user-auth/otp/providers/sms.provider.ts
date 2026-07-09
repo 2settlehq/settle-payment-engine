@@ -15,7 +15,8 @@ export const smsOtpProvider: OtpDeliveryProvider = {
   channel: 'phone',
 
   isEnabled(): boolean {
-    return config.auth.sms.enabled && !!config.auth.sms.gatewayUrl;
+    const { sms } = config.auth;
+    return sms.enabled && sms.provider === 'generic' && !!sms.gatewayUrl;
   },
 
   async send(identifier: string, code: string): Promise<void> {

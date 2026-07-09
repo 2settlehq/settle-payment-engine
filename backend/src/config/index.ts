@@ -247,12 +247,23 @@ export const config = {
 
     sms: {
       enabled: process.env.SMS_OTP_ENABLED === "true",
-      // Generic HTTP gateway - point this at whichever SMS provider you use
-      // (Termii, Africa's Talking, etc). gatewayUrl receives a POST with
-      // { to, message, senderId, apiKey } as JSON.
+      // "generic" (bring-your-own HTTP gateway) or "africastalking"
+      provider: process.env.SMS_PROVIDER || "generic",
+      senderId: process.env.SMS_SENDER_ID || "2Settle",
+
+      // Generic HTTP gateway - point this at whichever SMS provider you use.
+      // gatewayUrl receives a POST with { to, message, senderId } as JSON,
+      // Authorization: Bearer <apiKey>.
       gatewayUrl: process.env.SMS_GATEWAY_URL || "",
       apiKey: process.env.SMS_GATEWAY_API_KEY || "",
-      senderId: process.env.SMS_SENDER_ID || "2Settle",
+
+      africastalking: {
+        apiKey: process.env.AFRICASTALKING_API_KEY || "",
+        username: process.env.AFRICASTALKING_USERNAME || "",
+        baseUrl:
+          process.env.AFRICASTALKING_BASE_URL ||
+          "https://api.africastalking.com/version1/messaging",
+      },
     },
 
     google: {
