@@ -212,6 +212,63 @@ export const config = {
     },
   },
 
+  // End-user authentication (phone/email/wallet/Google login for the app)
+  auth: {
+    jwt: {
+      accessSecret: process.env.JWT_ACCESS_SECRET || "",
+      accessExpiresInSec: parseInt(
+        process.env.JWT_ACCESS_EXPIRES_IN_SEC || "900",
+        10,
+      ), // 15 minutes
+      refreshExpiresInDays: parseInt(
+        process.env.JWT_REFRESH_EXPIRES_IN_DAYS || "30",
+        10,
+      ),
+    },
+
+    otp: {
+      codeLength: parseInt(process.env.OTP_CODE_LENGTH || "6", 10),
+      expiresInSec: parseInt(process.env.OTP_EXPIRES_IN_SEC || "300", 10), // 5 minutes
+      resendCooldownSec: parseInt(
+        process.env.OTP_RESEND_COOLDOWN_SEC || "60",
+        10,
+      ),
+      maxAttempts: parseInt(process.env.OTP_MAX_ATTEMPTS || "5", 10),
+    },
+
+    email: {
+      enabled: process.env.EMAIL_OTP_ENABLED === "true",
+      smtpHost: process.env.SMTP_HOST || "",
+      smtpPort: parseInt(process.env.SMTP_PORT || "587", 10),
+      smtpUser: process.env.SMTP_USER || "",
+      smtpPassword: process.env.SMTP_PASSWORD || "",
+      fromAddress: process.env.EMAIL_OTP_FROM || "no-reply@2settle.com",
+    },
+
+    sms: {
+      enabled: process.env.SMS_OTP_ENABLED === "true",
+      // Generic HTTP gateway - point this at whichever SMS provider you use
+      // (Termii, Africa's Talking, etc). gatewayUrl receives a POST with
+      // { to, message, senderId, apiKey } as JSON.
+      gatewayUrl: process.env.SMS_GATEWAY_URL || "",
+      apiKey: process.env.SMS_GATEWAY_API_KEY || "",
+      senderId: process.env.SMS_SENDER_ID || "2Settle",
+    },
+
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID || "",
+    },
+
+    wallet: {
+      nonceExpiresInSec: parseInt(
+        process.env.WALLET_NONCE_EXPIRES_IN_SEC || "300",
+        10,
+      ), // 5 minutes
+      messageStatement:
+        process.env.WALLET_SIGN_MESSAGE || "Sign in to 2Settle",
+    },
+  },
+
   // Security configuration
   security: {
     // HMAC signature settings
@@ -274,6 +331,7 @@ export const config = {
       "/v1/admin/*",
       "/v1/webhooks/*",
       "/v1/auth/*",
+      "/v1/users/*",
       "/v1/payments/:reference",
       "/v1/reports/lookup",
       "/v1/reports/:reportId",
