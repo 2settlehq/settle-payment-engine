@@ -5,9 +5,9 @@
  */
 
 import { z } from 'zod';
+import { PHONE_REGEX } from '../utils/phone';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PHONE_REGEX = /^\+?[1-9]\d{6,14}$/; // loose E.164
 const WALLET_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
 function refineIdentifier(data: { channel: 'email' | 'phone'; identifier: string }, ctx: z.RefinementCtx) {

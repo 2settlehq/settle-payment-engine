@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { PHONE_REGEX } from '../utils/phone';
 
 // =============================================================================
 // CONSTANTS
@@ -38,7 +39,7 @@ const NETWORKS = [
  */
 export const payerInputSchema = z.object({
   chatId: z.string().min(1, 'Chat ID is required'),
-  phone: z.string().optional(),
+  phone: z.string().regex(PHONE_REGEX, 'Invalid phone number - include country code, e.g. +2348012345678').optional(),
   walletAddress: z.string().optional(),
 });
 
@@ -50,7 +51,7 @@ export const payerInputSchema = z.object({
 export const receiverInputSchema = z.object({
   bankCode: z.string().min(1, 'Bank code is required'),
   accountNumber: z.string().min(1, 'Account number is required'),
-  phone: z.string().optional(),
+  phone: z.string().regex(PHONE_REGEX, 'Invalid phone number - include country code, e.g. +2348012345678').optional(),
   walletAddress: z.string().optional(),
 });
 
