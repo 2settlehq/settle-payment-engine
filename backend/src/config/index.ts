@@ -267,7 +267,13 @@ export const config = {
     },
 
     google: {
-      clientId: process.env.GOOGLE_CLIENT_ID || "",
+      // Comma-separated for multi-platform support (web/iOS/Android each get
+      // their own OAuth client ID from Google, but all issue tokens your
+      // backend must accept).
+      clientIds: (process.env.GOOGLE_CLIENT_ID || "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean),
     },
 
     wallet: {
