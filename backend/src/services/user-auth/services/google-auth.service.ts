@@ -14,13 +14,14 @@ let client: OAuth2Client | null = null;
 
 function getClient(): OAuth2Client {
   if (!client) {
-    client = new OAuth2Client(config.auth.google.clientId);
+    client = new OAuth2Client();
   }
   return client;
 }
 
 export async function verifyGoogleIdToken(idToken: string): Promise<User> {
-  if (!config.auth.google.clientId) {
+  const { clientIds } = config.auth.google;
+  if (clientIds.length === 0) {
     throw new Error('GOOGLE_CLIENT_ID is not configured');
   }
 
@@ -28,7 +29,7 @@ export async function verifyGoogleIdToken(idToken: string): Promise<User> {
   try {
     const ticket = await getClient().verifyIdToken({
       idToken,
-      audience: config.auth.google.clientId,
+      audience: clientIds,
     });
     payload = ticket.getPayload();
   } catch {
