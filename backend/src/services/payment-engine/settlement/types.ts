@@ -11,6 +11,7 @@ export interface SettlementRequest {
   accountNumber: string;
   bankCode: string;
   accountName: string;
+  bankName?: string;
   narration?: string;
 }
 
