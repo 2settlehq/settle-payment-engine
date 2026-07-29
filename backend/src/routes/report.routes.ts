@@ -111,7 +111,7 @@ router.get('/lookup', async (req: Request, res: Response, next: NextFunction) =>
 /**
  * GET /v1/reports/:reportId
  *
- * Look up a single report by its RPT-XXXXX ID.
+ * Look up a single report by its RPT-XXXXXX ID.
  */
 router.get('/:reportId', async (req: Request, res: Response, next: NextFunction) => {
   try {

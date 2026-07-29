@@ -74,5 +74,5 @@ export const updateReportSchema = z.object({
 // =============================================================================
 
 export const reportIdParamSchema = z.object({
-  reportId: z.string().regex(/^RPT-\d{5,}$/, 'Invalid report ID format'),
+  reportId: z.string().regex(/^RPT-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/, 'Invalid report ID format'),
 });
