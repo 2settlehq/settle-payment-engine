@@ -63,8 +63,24 @@ function rowToReport(row: ReportRow): Report {
   };
 }
 
-function formatReportId(id: number): string {
-  return `RPT-${String(id).padStart(5, '0')}`;
+// Same alphabet as payment references (id-generator.ts) — excludes ambiguous
+// characters (I, L, O, 0, 1) so IDs stay easy to read/type over phone or chat.
+const REPORT_ID_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+function generateReportId(): string {
+  let randomPart = '';
+  for (let i = 0; i < 6; i++) {
+    randomPart += REPORT_ID_CHARS[Math.floor(Math.random() * REPORT_ID_CHARS.length)];
+  }
+  return `RPT-${randomPart}`;
+}
+
+async function reportIdExists(reportId: string): Promise<boolean> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT 1 FROM reports WHERE report_id = ? LIMIT 1`,
+    [reportId]
+  );
+  return rows.length > 0;
 }
 
 // =============================================================================
@@ -73,57 +89,47 @@ function formatReportId(id: number): string {
 
 /**
  * Create a new complaint report.
- * Inserts the row, then updates report_id based on the auto-increment id.
+ * Generates a random report_id up front, retrying on the rare collision.
  */
 export async function createReport(input: CreateReportInput): Promise<Report> {
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
+  let reportId = generateReportId();
+  let attempts = 0;
+  const maxAttempts = 5;
 
-    // Insert with a placeholder report_id
-    const [result] = await conn.execute<ResultSetHeader>(
-      `INSERT INTO reports
-        (report_id, api_key_id, merchant_id, session_reference,
-         complaint_type, name, phone_number, wallet_address,
-         fraudster_wallet_address, description, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-      [
-        'RPT-TEMP',
-        input.apiKeyId,
-        input.merchantId,
-        input.sessionReference ?? null,
-        input.complaintType,
-        input.name,
-        input.phoneNumber ?? null,
-        input.walletAddress ?? null,
-        input.fraudsterWalletAddress ?? null,
-        input.description ?? null,
-      ]
-    );
-
-    const reportId = formatReportId(result.insertId);
-
-    // Update with the real report_id
-    await conn.execute(
-      `UPDATE reports SET report_id = ? WHERE id = ?`,
-      [reportId, result.insertId]
-    );
-
-    await conn.commit();
-
-    // Fetch and return the created report
-    const [rows] = await pool.execute<ReportRow[]>(
-      `SELECT * FROM reports WHERE id = ?`,
-      [result.insertId]
-    );
-
-    return rowToReport(rows[0]);
-  } catch (err) {
-    await conn.rollback();
-    throw err;
-  } finally {
-    conn.release();
+  while (await reportIdExists(reportId)) {
+    attempts++;
+    if (attempts >= maxAttempts) {
+      throw new Error('Failed to generate unique report ID after multiple attempts');
+    }
+    reportId = generateReportId();
   }
+
+  const [result] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO reports
+      (report_id, api_key_id, merchant_id, session_reference,
+       complaint_type, name, phone_number, wallet_address,
+       fraudster_wallet_address, description, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+    [
+      reportId,
+      input.apiKeyId,
+      input.merchantId,
+      input.sessionReference ?? null,
+      input.complaintType,
+      input.name,
+      input.phoneNumber ?? null,
+      input.walletAddress ?? null,
+      input.fraudsterWalletAddress ?? null,
+      input.description ?? null,
+    ]
+  );
+
+  const [rows] = await pool.execute<ReportRow[]>(
+    `SELECT * FROM reports WHERE id = ?`,
+    [result.insertId]
+  );
+
+  return rowToReport(rows[0]);
 }
 
 // =============================================================================
@@ -131,7 +137,7 @@ export async function createReport(input: CreateReportInput): Promise<Report> {
 // =============================================================================
 
 /**
- * Fetch a single report by its human-readable report_id (RPT-XXXXX).
+ * Fetch a single report by its human-readable report_id (RPT-XXXXXX).
  */
 export async function getReportByReportId(reportId: string): Promise<Report | null> {
   const [rows] = await pool.execute<ReportRow[]>(

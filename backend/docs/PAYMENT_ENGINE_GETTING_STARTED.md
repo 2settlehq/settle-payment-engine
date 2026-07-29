@@ -7,6 +7,7 @@ A crypto-to-fiat payment processing API supporting transfers, gifts, payment req
 - [Overview](#overview)
 - [Quick Start](#quick-start)
 - [Authentication](#authentication)
+- [End-User Authentication](#end-user-authentication)
 - [Payment Types](#payment-types)
 - [API Reference](#api-reference)
 - [Payment Flows](#payment-flows)
@@ -244,6 +245,522 @@ const { timestamp, signature, bodyStr } = signRequest(
 - **Timestamp Tolerance:** Requests older than 5 minutes are rejected
 - **Secret Key Hashing:** We use `SHA256(secretKey)` as the HMAC key for additional security
 - **Body Hashing:** The request body is hashed to prevent tampering
+
+---
+
+## End-User Authentication
+
+Everything above (`X-API-Key` / `X-Timestamp` / `X-Signature`) is for **merchants**
+integrating the payment API. `/v1/users/*` is a completely separate identity
+system: passwordless login for the end-user app (web/mobile) via email/phone
+OTP, wallet signature (SIWE-style), or Google Sign-In. It requires **no HMAC
+headers at all** — auth endpoints are public, and profile endpoints use a
+JWT bearer token instead.
+
+Every login method resolves to the same kind of `user` account, protected by
+a short-lived JWT access token plus a rotating refresh token — the refresh
+token follows the same "never store the raw secret" convention as API keys:
+only `SHA256(refreshToken)` is ever persisted.
+
+### Login methods
+
+| Method | How it works |
+|--------|---------------|
+| Email OTP | 6-digit code emailed to the user, verified server-side |
+| Phone OTP | 6-digit code sent by SMS, verified server-side |
+| Wallet | Sign a server-issued nonce with a wallet private key |
+| Google | Client-side Google Sign-In, server verifies the ID token |
+
+If a Google account's email is verified and already belongs to an existing
+user (from a prior email-OTP login), the Google identity is linked to that
+account instead of creating a duplicate.
+
+**Token lifetimes:** access tokens default to 900s (`JWT_ACCESS_EXPIRES_IN_SEC`,
+stateless JWT, can't be revoked early); refresh tokens default to 30 days
+(`JWT_REFRESH_EXPIRES_IN_DAYS`, hashed and stored, revocable via logout /
+logout-all). Every call to `/refresh` rotates the token — the old refresh
+token is revoked and a new pair is issued, so always persist the latest pair.
+
+In local development, `EMAIL_OTP_ENABLED`/`SMS_OTP_ENABLED` default to
+`false`, so OTP codes are logged to the server console instead of actually
+being sent — no SMTP/SMS credentials needed to test the flow.
+
+### Endpoint Reference
+
+#### 1. Request OTP
+
+```
+POST /v1/users/auth/otp/request
+```
+
+**Auth:** None
+
+| Field | Type | Required | Description |
+|-------|------|----------|--------------|
+| `channel` | string | Yes | `"email"` or `"phone"` |
+| `identifier` | string | Yes | Email address or phone number matching `channel` |
+
+```bash
+curl -X POST https://api.2settle.io/v1/users/auth/otp/request \
+  -H "Content-Type: application/json" \
+  -d '{ "channel": "email", "identifier": "jane@example.com" }'
+```
+
+```json
+{ "success": true, "data": { "expiresInSec": 300 } }
+```
+
+**Notes:**
+- Enforces a resend cooldown (`OTP_RESEND_COOLDOWN_SEC`, default 60s) per
+  `(channel, identifier)` — requesting again too soon returns
+  `OTP_RATE_LIMITED` (429) with the remaining wait time in the message.
+- Code length is configurable (`OTP_CODE_LENGTH`, default 6 digits) and
+  expires after `OTP_EXPIRES_IN_SEC` (default 300s).
+- Email codes are sent via SMTP using a branded HTML template; phone codes go
+  through the configured SMS provider (`generic` HTTP gateway or Africa's
+  Talking).
+
+---
+
+#### 2. Verify OTP
+
+```
+POST /v1/users/auth/otp/verify
+```
+
+**Auth:** None
+
+| Field | Type | Required | Description |
+|-------|------|----------|--------------|
+| `channel` | string | Yes | `"email"` or `"phone"` — must match the request |
+| `identifier` | string | Yes | Same identifier used in the request |
+| `code` | string | Yes | The code received |
+
+```bash
+curl -X POST https://api.2settle.io/v1/users/auth/otp/verify \
+  -H "Content-Type: application/json" \
+  -d '{ "channel": "email", "identifier": "jane@example.com", "code": "482913" }'
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "b3f1c2d4-...",
+      "displayName": null,
+      "avatarUrl": null,
+      "status": "active",
+      "lastLoginAt": "2026-07-10T09:00:00.000Z",
+      "createdAt": "2026-07-01T12:00:00.000Z",
+      "updatedAt": "2026-07-10T09:00:00.000Z"
+    },
+    "accessToken": "eyJhbGciOi...",
+    "refreshToken": "6f2c9a8e...",
+    "expiresInSec": 900
+  }
+}
+```
+
+**Notes:**
+- First-time identifiers auto-create a `user` row — there is no separate
+  signup step.
+- Up to `OTP_MAX_ATTEMPTS` (default 5) wrong codes are allowed per issued
+  code before it locks out.
+- A matching, unexpired, unconsumed code is required or the call fails with
+  `INVALID_OTP` (400) — this one code covers "wrong", "expired", and
+  "already used" uniformly.
+
+---
+
+#### 3. Request Wallet Nonce
+
+```
+POST /v1/users/auth/wallet/nonce
+```
+
+**Auth:** None
+
+| Field | Type | Required | Description |
+|-------|------|----------|--------------|
+| `address` | string | Yes | EVM address, `0x` + 40 hex chars |
+
+```bash
+curl -X POST https://api.2settle.io/v1/users/auth/wallet/nonce \
+  -H "Content-Type: application/json" \
+  -d '{ "address": "0xabc1234567890def1234567890abcdef12345678" }'
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "nonce": "a1b2c3d4e5f6...",
+    "message": "Sign in to 2Settle\n\nAddress: 0xabc...\nNonce: a1b2c3d4e5f6...\nIssued At: 2026-07-10T09:00:00.000Z",
+    "expiresInSec": 300
+  }
+}
+```
+
+**Notes:**
+- The client must sign the entire `message` string verbatim — the server
+  re-derives the same message shape when checking the signature, so
+  altering whitespace or formatting client-side will fail verification.
+- The statement line is configurable via `WALLET_SIGN_MESSAGE`; the nonce
+  lifetime via `WALLET_NONCE_EXPIRES_IN_SEC` (default 300s).
+
+---
+
+#### 4. Verify Wallet Signature
+
+```
+POST /v1/users/auth/wallet/verify
+```
+
+**Auth:** None
+
+| Field | Type | Required | Description |
+|-------|------|----------|--------------|
+| `address` | string | Yes | Same address used to request the nonce |
+| `signature` | string | Yes | Signature produced by signing `message` |
+
+```bash
+curl -X POST https://api.2settle.io/v1/users/auth/wallet/verify \
+  -H "Content-Type: application/json" \
+  -d '{ "address": "0xabc1234567890def1234567890abcdef12345678", "signature": "0x..." }'
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "user": { "...": "same shape as OTP verify" },
+    "accessToken": "eyJhbGciOi...",
+    "refreshToken": "9d3f7b2a...",
+    "expiresInSec": 900
+  }
+}
+```
+
+**Notes:**
+- Only the most recent, unconsumed, unexpired nonce for that address is
+  accepted, and each nonce can be used exactly once — a missing, stale, or
+  already-consumed nonce fails with `WALLET_NONCE_EXPIRED` (400).
+- If the recovered signer doesn't match the requested address, fails with
+  `INVALID_WALLET_SIGNATURE` (401).
+- First-time addresses auto-create a user with a verified `wallet` identity
+  — the signature itself is the proof of ownership, no separate OTP step.
+
+---
+
+#### 5. Google Sign-In
+
+```
+POST /v1/users/auth/google
+```
+
+**Auth:** None
+
+| Field | Type | Required | Description |
+|-------|------|----------|--------------|
+| `idToken` | string | Yes | ID token from Google Sign-In, obtained client-side |
+
+```bash
+curl -X POST https://api.2settle.io/v1/users/auth/google \
+  -H "Content-Type: application/json" \
+  -d '{ "idToken": "eyJhbGciOiJSUzI1NiIs..." }'
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "user": { "...": "same shape as OTP verify" },
+    "accessToken": "eyJhbGciOi...",
+    "refreshToken": "2c8e1a4f...",
+    "expiresInSec": 900
+  }
+}
+```
+
+**Notes:**
+- The server verifies `idToken` against every configured Google OAuth
+  client ID (`GOOGLE_CLIENT_ID` is comma-separated — one entry per
+  platform: web, iOS, Android), so the same backend accepts tokens minted
+  for any of your app's client IDs.
+- If the token's email is verified by Google **and** already belongs to an
+  existing user (from a prior email-OTP login), the Google identity links
+  to that account — same `user.id` either way, no duplicate account.
+- Otherwise creates a new user, seeded with the Google profile's
+  `displayName`/`avatarUrl`, and (if the email is verified) also links an
+  `email` identity so that user can later log in with email OTP too.
+- An invalid/unverifiable token fails with `INVALID_GOOGLE_TOKEN` (401).
+
+---
+
+#### 6. Refresh Token
+
+```
+POST /v1/users/auth/refresh
+```
+
+**Auth:** None
+
+| Field | Type | Required | Description |
+|-------|------|----------|--------------|
+| `refreshToken` | string | Yes | The refresh token from the last login/refresh |
+
+```bash
+curl -X POST https://api.2settle.io/v1/users/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{ "refreshToken": "6f2c9a8e..." }'
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "accessToken": "eyJhbGciOi...",
+    "refreshToken": "d47a1c9e...",
+    "expiresInSec": 900
+  }
+}
+```
+
+**Notes:**
+- Revokes the presented token and issues a brand new pair in the same
+  call — treat every refresh response as the new source of truth and
+  discard the old tokens.
+- Reusing an already-rotated (or expired/unknown) token fails with
+  `INVALID_REFRESH_TOKEN` (401), which your client should treat as "user
+  must log in again."
+
+---
+
+#### 7. Logout (Single Device)
+
+```
+POST /v1/users/auth/logout
+```
+
+**Auth:** None (the refresh token itself is the credential)
+
+| Field | Type | Required | Description |
+|-------|------|----------|--------------|
+| `refreshToken` | string | Yes | The refresh token for the session being logged out |
+
+```bash
+curl -X POST https://api.2settle.io/v1/users/auth/logout \
+  -H "Content-Type: application/json" \
+  -d '{ "refreshToken": "6f2c9a8e..." }'
+```
+
+```json
+{ "success": true }
+```
+
+**Notes:**
+- Revokes just that one refresh token — other devices/sessions for the
+  same user stay logged in.
+- The access token isn't invalidated by this call (it's stateless and
+  simply expires on its own within `JWT_ACCESS_EXPIRES_IN_SEC`); the client
+  should just drop both tokens locally and stop calling `/refresh`.
+
+---
+
+#### 8. Logout All Devices
+
+```
+POST /v1/users/auth/logout-all
+```
+
+**Auth:** Bearer JWT
+
+No request body.
+
+```bash
+curl -X POST https://api.2settle.io/v1/users/auth/logout-all \
+  -H "Authorization: Bearer <accessToken>"
+```
+
+```json
+{ "success": true }
+```
+
+**Notes:**
+- Revokes every refresh token on the account in one call — use it for
+  "log out everywhere" / "I think my account is compromised" flows.
+- Requires the access token (not a refresh token) because it acts on the
+  whole account rather than a single session.
+
+---
+
+#### 9. Get Profile
+
+```
+GET /v1/users/me
+```
+
+**Auth:** Bearer JWT
+
+```bash
+curl https://api.2settle.io/v1/users/me \
+  -H "Authorization: Bearer <accessToken>"
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "b3f1c2d4-...",
+      "displayName": null,
+      "avatarUrl": null,
+      "status": "active",
+      "lastLoginAt": "2026-07-10T09:00:00.000Z",
+      "createdAt": "2026-07-01T12:00:00.000Z",
+      "updatedAt": "2026-07-10T09:00:00.000Z"
+    },
+    "identities": [
+      { "type": "email", "identifier": "jane@example.com", "verifiedAt": "2026-07-01T12:00:00.000Z" },
+      { "type": "wallet", "identifier": "0xabc...", "verifiedAt": "2026-07-05T08:00:00.000Z" }
+    ]
+  }
+}
+```
+
+**Notes:**
+- `identities` lists every login method linked to the account (email,
+  phone, wallet, google) with the identifier and when it was verified.
+
+---
+
+#### 10. Get Payment History
+
+```
+GET /v1/users/me/payments
+```
+
+**Auth:** Bearer JWT
+
+| Query Param | Default | Description |
+|-------|---------|--------------|
+| `status` | _(all)_ | Filter by payment status (`settled`, `pending`, etc.) |
+| `type` | _(all)_ | Filter by payment type (`transfer`, `gift`, `request`, ...) |
+| `from` | _(none)_ | ISO date — `created_at` range start |
+| `to` | _(none)_ | ISO date — `created_at` range end |
+| `limit` | 20 | Max 200 |
+| `offset` | 0 | Pagination offset |
+
+```bash
+curl "https://api.2settle.io/v1/users/me/payments?status=settled&limit=10" \
+  -H "Authorization: Bearer <accessToken>"
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "payments": [
+      {
+        "reference": "2S-K4M9PX",
+        "type": "transfer",
+        "status": "settled",
+        "fiat_amount": 50000,
+        "fiat_currency": "NGN",
+        "crypto": "USDT",
+        "crypto_amount": 31.2658,
+        "network": "trc20",
+        "direction": "sent",
+        "created_at": "2026-07-01T13:00:00.000Z",
+        "settled_at": "2026-07-01T13:13:02.000Z"
+      }
+    ],
+    "total": 1,
+    "limit": 10,
+    "offset": 0
+  }
+}
+```
+
+**Notes:**
+- Matches every payment session where one of the user's **verified phone
+  identities** is the payer or the receiver. There's no link table between
+  the auth system and the payment engine, so this matches by phone number
+  equality (normalizing formats like `0801...` vs `+234801...` on both
+  sides).
+- `direction` is `"sent"` if the user's phone matches the payer,
+  `"received"` if it matches the receiver, or `"both"` if it matches both
+  (e.g. a self-transfer).
+- If the user has no verified phone identity (email/wallet/Google-only
+  accounts), this returns an empty list rather than an error.
+
+### Error codes
+
+| Code | HTTP | Meaning |
+|------|------|---------|
+| `INVALID_OTP` | 400 | Code wrong, expired, already used, or too many attempts |
+| `OTP_RATE_LIMITED` | 429 | Resend requested before the cooldown (`OTP_RESEND_COOLDOWN_SEC`) elapsed |
+| `OTP_CHANNEL_DISABLED` | 503 | Email/SMS delivery disabled or misconfigured |
+| `INVALID_WALLET_SIGNATURE` | 401 | Signature doesn't recover to the claimed address |
+| `WALLET_NONCE_EXPIRED` | 400 | Nonce missing, expired, or already consumed |
+| `INVALID_GOOGLE_TOKEN` | 401 | Google ID token failed verification |
+| `INVALID_REFRESH_TOKEN` | 401 | Refresh token unknown, revoked, or expired — log in again |
+| `MISSING_ACCESS_TOKEN` | 401 | No/malformed `Authorization: Bearer` header |
+| `INVALID_ACCESS_TOKEN` | 401 | Access token invalid or expired — refresh and retry once |
+| `USER_NOT_FOUND` | 404 | User row missing for an otherwise-valid token |
+
+### Node.js example
+
+```javascript
+class UserAuthClient {
+  constructor(baseUrl = 'https://api.2settle.io') {
+    this.baseUrl = baseUrl;
+    this.accessToken = null;
+    this.refreshToken = null;
+  }
+
+  async request(method, path, body, useAuth = false) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (useAuth) headers['Authorization'] = `Bearer ${this.accessToken}`;
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return res.json();
+  }
+
+  async verifyEmailOtp(email, code) {
+    const { data } = await this.request('POST', '/v1/users/auth/otp/verify', {
+      channel: 'email', identifier: email, code,
+    });
+    this.accessToken = data.accessToken;
+    this.refreshToken = data.refreshToken;
+    return data.user;
+  }
+
+  async me() {
+    return this.request('GET', '/v1/users/me', null, true);
+  }
+
+  async logout() {
+    const result = await this.request('POST', '/v1/users/auth/logout', {
+      refreshToken: this.refreshToken,
+    });
+    this.accessToken = null;
+    this.refreshToken = null;
+    return result;
+  }
+
+  async logoutAll() {
+    const result = await this.request('POST', '/v1/users/auth/logout-all', null, true);
+    this.accessToken = null;
+    this.refreshToken = null;
+    return result;
+  }
+}
+```
 
 ---
 

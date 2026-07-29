@@ -1106,6 +1106,11 @@ export class DepositWatcher extends EventEmitter {
     walletService.expireOldWallets().catch((err) => {
       console.error('[DepositWatcher] Error expiring old wallets:', err.message);
     });
+
+    // Flip stale payment sessions (past expiresAt, never got a deposit) to 'expired' in the DB
+    sessionManager.expireStale().catch((err) => {
+      console.error('[DepositWatcher] Error expiring stale payment sessions:', err.message);
+    });
   }
 
   /**
