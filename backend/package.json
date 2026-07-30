@@ -10,6 +10,7 @@
     "generate:gift-ids": "tsx scripts/generate-gift-ids.ts",
     "recover": "tsx scripts/recover-stuck-hd-sweep.ts",
     "recover:hd-sweep": "tsx scripts/recover-stuck-hd-sweep.ts",
+    "report:successful-payments": "node scripts/successful-payments-report.js",
     "start": "node dist/index.js",
     "sync:paystack-banks": "tsx scripts/sync-paystack-banks.ts",
     "update:gift-fields-by-amount": "node scripts/update-gift-fields-by-amount.js",
