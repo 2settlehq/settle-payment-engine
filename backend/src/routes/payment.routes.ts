@@ -166,12 +166,15 @@ router.post(
         // Use this to record manual/external transfers that have already been settled.
         const { pool } = await import('../lib/mysql');
         const now = new Date();
+        const manualTransactionUsd =
+          session.transactionUsd ?? (session.rate ? session.fiatAmount / session.rate : null);
         await pool.query(
           `UPDATE payment_sessions
            SET status = 'settled',
                tx_hash = ?,
                settlement_reference = ?,
                settlement_provider = 'manual',
+               transaction_usd = ?,
                confirmed_at = ?,
                settled_at = ?,
                updated_at = ?
@@ -179,6 +182,7 @@ router.post(
           [
             input.txHash ?? null,
             input.settlementReference ?? null,
+            manualTransactionUsd,
             now,
             now,
             now,
