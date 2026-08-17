@@ -356,7 +356,7 @@ export class SettlementService {
     // Handle based on status
     if (status === 'success') {
       // Mark session as settled
-      await this.markSessionSettled(session.id);
+      await this.markSessionSettled(session.id, payload.fee);
       sendPaymentWebhook(session.id, 'payment.settled').catch(() => {});
       console.log(`[Settlement] Completed for ${session.reference}`);
     } else if (status === 'reversed' || status === 'failed') {
@@ -494,10 +494,12 @@ export class SettlementService {
     );
   }
 
-  private async markSessionSettled(sessionId: string): Promise<void> {
+  private async markSessionSettled(sessionId: string, settlementFee?: number): Promise<void> {
     await pool.execute(
-      `UPDATE payment_sessions SET status = 'settled', settled_at = NOW(), updated_at = NOW() WHERE id = ?`,
-      [sessionId]
+      `UPDATE payment_sessions
+       SET status = 'settled', settled_at = NOW(), settlement_fee = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [settlementFee ?? null, sessionId]
     );
   }
 
