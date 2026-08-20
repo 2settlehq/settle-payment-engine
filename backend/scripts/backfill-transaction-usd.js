@@ -12,6 +12,7 @@
  *   pnpm run backfill:transaction-usd
  *   pnpm run backfill:transaction-usd -- --apply
  *   pnpm run backfill:transaction-usd -- --host YOUR_HOST --user YOUR_USER --password YOUR_PASSWORD --db YOUR_DB --apply
+ *   pnpm run backfill:transaction-usd -- --host YOUR_HOST --user YOUR_USER --password YOUR_PASSWORD --db YOUR_DB --diagnose
  */
 
 const fs = require('fs');
@@ -55,6 +56,7 @@ async function main() {
   const user = getArg('--user', process.env.DB_USER || 'root');
   const password = getArg('--password', process.env.DB_PASSWORD || '');
   const apply = hasFlag('--apply');
+  const diagnose = hasFlag('--diagnose');
 
   assertDatabaseName(database);
 
@@ -65,6 +67,40 @@ async function main() {
     password,
     database,
   });
+
+  if (diagnose) {
+    const [byProvider] = await connection.query(
+      `
+        SELECT
+          settlement_provider,
+          COUNT(*) AS total,
+          SUM(transaction_usd IS NULL) AS null_usd,
+          SUM(fiat_amount IS NULL) AS null_fiat_amount,
+          SUM(rate IS NULL) AS null_rate,
+          SUM(rate = 0) AS zero_rate
+        FROM payment_sessions
+        GROUP BY settlement_provider
+      `
+    );
+    console.log(`Database: ${database}`);
+    console.log('Breakdown by settlement_provider:');
+    console.table(byProvider);
+
+    const [manualSample] = await connection.query(
+      `
+        SELECT id, reference, status, fiat_amount, rate, transaction_usd, settlement_provider, settled_at
+        FROM payment_sessions
+        WHERE settlement_provider = 'manual'
+        ORDER BY created_at DESC
+        LIMIT 15
+      `
+    );
+    console.log(`Sample manual rows (${manualSample.length} of possibly more):`);
+    console.table(manualSample);
+
+    await connection.end();
+    return;
+  }
 
   try {
     const [rows] = await connection.query(
