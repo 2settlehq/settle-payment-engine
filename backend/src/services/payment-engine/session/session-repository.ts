@@ -108,7 +108,11 @@ function rowToSession(row: any): PaymentSession {
     expiresAt: new Date(row.expires_at),
     confirmedAt: row.confirmed_at ? new Date(row.confirmed_at) : undefined,
     settledAt: row.settled_at ? new Date(row.settled_at) : undefined,
-    metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+    metadata: row.metadata
+      ? typeof row.metadata === 'string'
+        ? JSON.parse(row.metadata)
+        : row.metadata
+      : undefined,
     bankRef: row.bank_ref || undefined,
     isSandbox: Boolean(row.is_sandbox),
   };
