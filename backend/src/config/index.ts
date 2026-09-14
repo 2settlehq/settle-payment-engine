@@ -247,7 +247,7 @@ export const config = {
 
     sms: {
       enabled: process.env.SMS_OTP_ENABLED === "true",
-      // "generic" (bring-your-own HTTP gateway) or "africastalking"
+      // "generic" (bring-your-own HTTP gateway), "africastalking", or "sendchamp"
       provider: process.env.SMS_PROVIDER || "generic",
       senderId: process.env.SMS_SENDER_ID || "2Settle",
 
@@ -263,6 +263,16 @@ export const config = {
         baseUrl:
           process.env.AFRICASTALKING_BASE_URL ||
           "https://api.africastalking.com/version1/messaging",
+      },
+
+      sendchamp: {
+        apiKey: process.env.SENDCHAMP_API_KEY || "",
+        senderName: process.env.SENDCHAMP_SENDER_NAME || "2Settle",
+        // "dnd" (default, delivers to Do-Not-Disturb lines in Nigeria),
+        // "non_dnd", or "international"
+        route: process.env.SENDCHAMP_ROUTE || "dnd",
+        baseUrl:
+          process.env.SENDCHAMP_BASE_URL || "https://api.sendchamp.com/api/v1",
       },
     },
 
