@@ -7,9 +7,14 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { pool } from '../lib/mysql';
 import { RowDataPacket } from 'mysql2';
-import { getUserById, getIdentitiesForUser } from '../services/user-auth/services/user.service';
+import {
+  getUserById,
+  getIdentitiesForUser,
+  updateUserProfile,
+} from '../services/user-auth/services/user.service';
 import { UserNotFoundError } from '../services/user-auth/errors';
 import { normalizePhone, phoneVariants } from '../utils/phone';
+import { updateProfileSchema } from '../validation/user-auth.schemas';
 
 const router = Router();
 
@@ -27,6 +32,30 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
         identities: identities.map(({ type, identifier, verifiedAt }) => ({ type, identifier, verifiedAt })),
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PATCH /v1/users/me
+ *
+ * Update the caller's own display name and/or avatar URL. Both fields are
+ * optional but at least one must be present.
+ */
+router.patch('/', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = updateProfileSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: parsed.error.flatten(),
+      });
+    }
+
+    const user = await updateUserProfile(req.endUser!.id, parsed.data);
+    res.json({ success: true, data: { user } });
   } catch (err) {
     next(err);
   }

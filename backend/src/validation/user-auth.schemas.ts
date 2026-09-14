@@ -46,3 +46,10 @@ export const googleAuthSchema = z.object({
 export const refreshTokenSchema = z.object({
   refreshToken: z.string().min(1),
 });
+
+export const updateProfileSchema = z.object({
+  displayName: z.string().trim().min(1).max(255).nullable().optional(),
+  avatarUrl: z.string().trim().url().max(500).nullable().optional(),
+}).refine((data) => data.displayName !== undefined || data.avatarUrl !== undefined, {
+  message: 'At least one of displayName or avatarUrl is required',
+});
