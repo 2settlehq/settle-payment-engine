@@ -16,6 +16,7 @@ import {
   verifyReceiverSchema,
   claimGiftSchema,
   fulfillRequestSchema,
+  estimatePaymentSchema,
 } from '../validation/payment.schemas';
 import { PaymentEngineError } from '../services/payment-engine/errors';
 import { requirePermission } from '../security/middleware/authenticate';
@@ -23,6 +24,8 @@ import { settlementService } from '../services/payment-engine/settlement/settlem
 import { bankService } from '../services/bank/bank.service';
 import { sessionManager } from '../services/payment-engine/session/session-manager';
 import { sendPaymentWebhook } from '../services/payment-engine/payment-webhook.service';
+import { lockRate } from '../services/payment-engine/rate';
+import { calculateCharges } from '../services/payment-engine/charges';
 
 const router = Router();
 
@@ -248,6 +251,69 @@ router.post(
     next(err);
   }
 });
+
+// =============================================================================
+// ESTIMATE PAYMENT
+// =============================================================================
+
+/**
+ * POST /payments/estimate
+ *
+ * Sessionless preview of a payment — locks a rate, calculates fees, and
+ * returns the crypto amount the payer would need to send. Does not create
+ * a session, wallet, or any DB record, and needs no payer/receiver, so it
+ * can be called before the caller has an end-user session.
+ *
+ * The percentage "first transaction" fee (see session-manager.ts) requires
+ * a known session owner and isn't applied here — this always estimates
+ * against the base flat fee tier; the real fee is finalized when the
+ * payment is actually created.
+ */
+router.post(
+  '/estimate',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const parsed = estimatePaymentSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: parsed.error.flatten(),
+        });
+      }
+
+      const { fiatAmount, fiatCurrency, crypto, network, chargeFrom } = parsed.data;
+
+      const rateLock = await lockRate(crypto, fiatCurrency);
+      const charges = calculateCharges(fiatAmount, crypto, rateLock, undefined, chargeFrom, 0);
+
+      return res.json({
+        success: true,
+        estimate: {
+          cryptoAmount: charges.totalCryptoAmount,
+          crypto,
+          network,
+          fiatAmount: charges.netFiatAmount,
+          fiatCurrency,
+          rate: rateLock.rate,
+          conversionFee: charges.percentageFiatCharge,
+          processingFee: charges.flatFiatCharge,
+          chargeFrom,
+          expiresAt: rateLock.expiresAt,
+        },
+      });
+    } catch (err) {
+      if (err instanceof PaymentEngineError) {
+        return res.status(err.statusCode).json({
+          success: false,
+          error: err.message,
+          code: err.code,
+        });
+      }
+      next(err);
+    }
+  }
+);
 
 // =============================================================================
 // VERIFY RECEIVER

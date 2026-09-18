@@ -7,6 +7,7 @@ import pool from '../../../lib/mysql';
 import { RowDataPacket } from 'mysql2';
 import { generateUUID } from '../../../security/utils/crypto';
 import { IdentityType, User, UserIdentity } from '../types';
+import { UserNotFoundError } from '../errors';
 
 interface UserRow extends RowDataPacket {
   id: string;
@@ -162,4 +163,34 @@ export async function findOrCreateUserForGoogle(
 
 export async function touchLastLogin(userId: string): Promise<void> {
   await pool.query(`UPDATE users SET last_login_at = NOW() WHERE id = ?`, [userId]);
+}
+
+/**
+ * Partial update of the caller's own profile — only the fields present in
+ * `updates` are touched, so a client can send just displayName or just
+ * avatarUrl without clobbering the other.
+ */
+export async function updateUserProfile(
+  userId: string,
+  updates: { displayName?: string | null; avatarUrl?: string | null }
+): Promise<User> {
+  const columns: string[] = [];
+  const values: (string | null)[] = [];
+
+  if (updates.displayName !== undefined) {
+    columns.push('display_name = ?');
+    values.push(updates.displayName);
+  }
+  if (updates.avatarUrl !== undefined) {
+    columns.push('avatar_url = ?');
+    values.push(updates.avatarUrl);
+  }
+
+  if (columns.length > 0) {
+    await pool.query(`UPDATE users SET ${columns.join(', ')} WHERE id = ?`, [...values, userId]);
+  }
+
+  const user = await getUserById(userId);
+  if (!user) throw new UserNotFoundError();
+  return user;
 }

@@ -2,6 +2,7 @@ export type { OtpDeliveryProvider } from './types';
 export { emailOtpProvider } from './email.provider';
 export { smsOtpProvider } from './sms.provider';
 export { africasTalkingOtpProvider } from './africastalking.provider';
+export { sendchampOtpProvider } from './sendchamp.provider';
 export { createConsoleProvider } from './console.provider';
 
 import { OtpChannel } from '../../types';
@@ -9,6 +10,7 @@ import { OtpDeliveryProvider } from './types';
 import { emailOtpProvider } from './email.provider';
 import { smsOtpProvider } from './sms.provider';
 import { africasTalkingOtpProvider } from './africastalking.provider';
+import { sendchampOtpProvider } from './sendchamp.provider';
 import { createConsoleProvider } from './console.provider';
 
 const CONSOLE_FALLBACKS: Record<OtpChannel, OtpDeliveryProvider> = {
@@ -17,7 +19,11 @@ const CONSOLE_FALLBACKS: Record<OtpChannel, OtpDeliveryProvider> = {
 };
 
 // SMS has more than one real provider - checked in order, first one enabled wins.
-const SMS_PROVIDERS: OtpDeliveryProvider[] = [africasTalkingOtpProvider, smsOtpProvider];
+const SMS_PROVIDERS: OtpDeliveryProvider[] = [
+  africasTalkingOtpProvider,
+  sendchampOtpProvider,
+  smsOtpProvider,
+];
 
 /**
  * Returns the provider to use for a channel - the real (configured/enabled)
