@@ -19,6 +19,14 @@ export interface ChargeResult {
   netFiatAmount: number;
   totalCryptoAmount: number;
   chargeFrom: 'fiat' | 'crypto';
+  /** Flat tiered platform fee component of fiatCharge (the "processing fee"). */
+  flatFiatCharge: number;
+  /** Flat tiered platform fee component of cryptoCharge. */
+  flatCryptoCharge: number;
+  /** Percentage-based fee component of fiatCharge (the "conversion fee") — 0 unless percentageFeeRate > 0. */
+  percentageFiatCharge: number;
+  /** Percentage-based fee component of cryptoCharge — 0 unless percentageFeeRate > 0. */
+  percentageCryptoCharge: number;
 }
 
 export const AMOUNT_LIMITS = {
@@ -152,6 +160,10 @@ export function calculateCharges(
       netFiatAmount: fiatAmount - fiatCharge,
       totalCryptoAmount: roundCryptoAmount(netCrypto, crypto),
       chargeFrom: 'fiat',
+      flatFiatCharge,
+      flatCryptoCharge,
+      percentageFiatCharge: extraFiatFee,
+      percentageCryptoCharge: extraCryptoFee,
     };
   }
 
@@ -165,6 +177,10 @@ export function calculateCharges(
     netFiatAmount: fiatAmount,
     totalCryptoAmount: roundCryptoAmount(netCrypto + cryptoCharge, crypto),
     chargeFrom: 'crypto',
+    flatFiatCharge,
+    flatCryptoCharge,
+    percentageFiatCharge: extraFiatFee,
+    percentageCryptoCharge: extraCryptoFee,
   };
 }
 
