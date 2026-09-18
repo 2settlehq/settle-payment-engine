@@ -153,6 +153,42 @@ export class SettlementFailedError extends PaymentEngineError {
   }
 }
 
+export class InsufficientProviderBalanceError extends PaymentEngineError {
+  readonly provider: string;
+  readonly currency: string;
+  readonly requested: number;
+  readonly spendable: number;
+
+  constructor(provider: string, currency: string, requested: number, spendable: number) {
+    super(
+      `Provider ${provider} has insufficient ${currency} balance (spendable ${spendable}, requested ${requested})`,
+      'INSUFFICIENT_PROVIDER_BALANCE',
+      503
+    );
+    this.provider = provider;
+    this.currency = currency;
+    this.requested = requested;
+    this.spendable = spendable;
+  }
+}
+
+export class NoProviderAvailableError extends PaymentEngineError {
+  readonly currency: string;
+  readonly amount: number;
+  readonly cause?: unknown;
+
+  constructor(currency: string, amount: number, cause?: unknown) {
+    super(
+      `No settlement provider has sufficient ${currency} balance to cover ${amount}`,
+      'NO_PROVIDER_AVAILABLE',
+      503
+    );
+    this.currency = currency;
+    this.amount = amount;
+    this.cause = cause;
+  }
+}
+
 // Database errors (500)
 export class DatabaseError extends PaymentEngineError {
   readonly operation: string;

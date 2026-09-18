@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 import { PaymentEngineError } from '../services/payment-engine/errors';
+import { UserAuthError } from '../services/user-auth/errors';
 import {
   SecurityError,
   AuthenticationError,
@@ -24,6 +25,15 @@ export function errorHandler(
   // Log error (but not for expected client errors)
   if (!err.statusCode || err.statusCode >= 500) {
     console.error(`[Error] ${req.method} ${req.path}:`, err);
+  }
+
+  // A response may already be underway (e.g. connect-timeout fired while a
+  // handler was still awaiting a slow downstream call). Express requires
+  // delegating to its default error handler once headers are sent, rather
+  // than writing again.
+  if (res.headersSent) {
+    next(err);
+    return;
   }
 
   // Attach error info for audit logging
@@ -73,6 +83,15 @@ export function errorHandler(
 
   // Handle Payment Engine errors
   if (err instanceof PaymentEngineError) {
+    res.status(err.statusCode).json({
+      error: err.message,
+      code: err.code,
+    });
+    return;
+  }
+
+  // Handle End-User Auth errors (phone/email/wallet/Google login)
+  if (err instanceof UserAuthError) {
     res.status(err.statusCode).json({
       error: err.message,
       code: err.code,

@@ -19,6 +19,8 @@ import {
 import { generatePaymentIds } from '../utils';
 import { lockRate } from '../rate';
 import { calculateCharges, calculateChargesFromCrypto } from '../charges';
+import config from '../../../config';
+import { platformConfigService } from '../../platform-config/platform-config.service';
 import { assignWallet, releaseWallet } from '../wallet';
 import { getHDWalletService } from '../hd-wallet';
 import { sessionOwnerService } from '../session-owner';
@@ -215,6 +217,16 @@ export class SessionManager {
     };
   }
 
+  private async isFirstTransaction(sessionOwnerId?: number): Promise<boolean> {
+    if (!sessionOwnerId) return false;
+    const pool = (await import('../../../lib/mysql')).default;
+    const [rows] = await pool.query(
+      'SELECT 1 FROM payment_sessions WHERE session_owner_id = ? LIMIT 1',
+      [sessionOwnerId]
+    ) as [any[], any];
+    return rows.length === 0;
+  }
+
   async createSession(input: CreatePaymentInput): Promise<PaymentSession> {
     validateCreateInput(input);
 
@@ -223,6 +235,11 @@ export class SessionManager {
     // We lock the rate here and carry it forward so lockRate is not called twice.
     let preLockedRate: import('../types').RateLock | undefined;
     let resolvedInput: CreatePaymentInput = input;
+
+    const firstTx = await this.isFirstTransaction(input.sessionOwnerId);
+    const percentageFeeRate = firstTx
+      ? await platformConfigService.getNumber('first_transaction_fee_rate', config.fees.firstTransactionFeeRate)
+      : 0;
 
     if (input.fiatAmount === undefined && input.cryptoAmount !== undefined) {
       preLockedRate = await lockRate(
@@ -233,7 +250,9 @@ export class SessionManager {
       const reverseResult = calculateChargesFromCrypto(
         input.cryptoAmount,
         input.crypto!,
-        preLockedRate
+        preLockedRate,
+        undefined,
+        percentageFeeRate
       );
       resolvedInput = { ...input, fiatAmount: reverseResult.derivedFiatAmount };
     }
@@ -301,7 +320,8 @@ export class SessionManager {
       resolvedInput.crypto!,
       rateLock,
       undefined,
-      resolvedInput.chargeFrom ?? 'crypto'
+      resolvedInput.chargeFrom ?? 'crypto',
+      percentageFeeRate
     );
 
     // Try HD wallet first, fall back to legacy wallet pool
@@ -707,10 +727,18 @@ export class SessionManager {
       this.config.rateLockTtlMinutes
     );
 
+    const fulfillFirstTx = await this.isFirstTransaction(sessionOwnerId ?? session.sessionOwnerId);
+    const fulfillPercentageFeeRate = fulfillFirstTx
+      ? await platformConfigService.getNumber('first_transaction_fee_rate', config.fees.firstTransactionFeeRate)
+      : 0;
+
     const charges = calculateCharges(
       session.fiatAmount,
       crypto as any,
-      rateLock
+      rateLock,
+      undefined,
+      'crypto',
+      fulfillPercentageFeeRate
     );
 
     // Assign wallet (HD or legacy)

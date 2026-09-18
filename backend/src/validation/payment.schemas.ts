@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { PHONE_REGEX } from '../utils/phone';
 
 // =============================================================================
 // CONSTANTS
@@ -38,7 +39,7 @@ const NETWORKS = [
  */
 export const payerInputSchema = z.object({
   chatId: z.string().min(1, 'Chat ID is required'),
-  phone: z.string().optional(),
+  phone: z.string().regex(PHONE_REGEX, 'Invalid phone number - include country code, e.g. +2348012345678').optional(),
   walletAddress: z.string().optional(),
 });
 
@@ -50,7 +51,7 @@ export const payerInputSchema = z.object({
 export const receiverInputSchema = z.object({
   bankCode: z.string().min(1, 'Bank code is required'),
   accountNumber: z.string().min(1, 'Account number is required'),
-  phone: z.string().optional(),
+  phone: z.string().regex(PHONE_REGEX, 'Invalid phone number - include country code, e.g. +2348012345678').optional(),
   walletAddress: z.string().optional(),
 });
 
@@ -296,6 +297,44 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
       break;
   }
 });
+
+// =============================================================================
+// ESTIMATE SCHEMA
+// =============================================================================
+
+/**
+ * Sessionless payment estimate — no payer/receiver, no session created.
+ * Shows the crypto amount + fee breakdown for a fiat amount before the
+ * caller has an end-user session. Same crypto/network compatibility rules
+ * as createPaymentSchema.
+ */
+export const estimatePaymentSchema = z
+  .object({
+    fiatAmount: z.number().positive('Fiat amount must be positive'),
+    fiatCurrency: z.enum(FIAT_CURRENCIES).default('NGN'),
+    crypto: z.enum(CRYPTO_CURRENCIES),
+    network: z.enum(NETWORKS),
+    chargeFrom: z.enum(['fiat', 'crypto']).default('crypto'),
+  })
+  .superRefine((data, ctx) => {
+    const validNetworks: Record<string, string[]> = {
+      BTC: ['bitcoin'],
+      ETH: ['ethereum'],
+      BNB: ['bsc'],
+      TRX: ['tron'],
+      USDT: ['erc20', 'bep20', 'trc20'],
+      USDC: ['erc20', 'bep20'],
+    };
+    if (!validNetworks[data.crypto]?.includes(data.network)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${data.crypto} is not supported on ${data.network}`,
+        path: ['network'],
+      });
+    }
+  });
+
+export type EstimatePaymentInput = z.infer<typeof estimatePaymentSchema>;
 
 // =============================================================================
 // VERIFY RECEIVER SCHEMA

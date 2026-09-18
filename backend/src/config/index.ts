@@ -124,6 +124,35 @@ export const config = {
     secret: process.env.ADMIN_SECRET || "", // Required for admin endpoints
   },
 
+  // Fee configuration
+  fees: {
+    // Extra percentage charged on a payer's first transaction (e.g. 0.03 = 3%)
+    firstTransactionFeeRate: parseFloat(process.env.FIRST_TRANSACTION_FEE_RATE || "0.03"),
+  },
+
+  // Rate Engine configuration
+  rateEngine: {
+    // How often the background job fetches fresh quotes from external providers (ms)
+    fetchIntervalMs: parseInt(process.env.RATE_FETCH_INTERVAL_MS || '30000', 10),
+    providers: {
+      busha: {
+        enabled: process.env.BUSHA_RATE_ENABLED === 'true',
+        apiKey: process.env.BUSHA_API_KEY || '',
+        apiUrl: process.env.BUSHA_API_URL || 'https://api.busha.co',
+      },
+      liquidramp: {
+        enabled: process.env.LIQUIDRAMP_RATE_ENABLED === 'true',
+        apiKey: process.env.LIQUIDRAMP_API_KEY || '',
+        apiUrl: process.env.LIQUIDRAMP_API_URL || '',
+      },
+      anchor: {
+        enabled: process.env.ANCHOR_RATE_ENABLED === 'true',
+        apiKey: process.env.ANCHOR_API_KEY || '',
+        apiUrl: process.env.ANCHOR_API_URL || 'https://api.anchorfis.com',
+      },
+    },
+  },
+
   // Reportly (Complaint Reporting) configuration
   reportly: {
     adminWebhookUrl: process.env.REPORTLY_ADMIN_WEBHOOK_URL || "",
@@ -158,6 +187,112 @@ export const config = {
       TRX: parseFloat(process.env.SWEEP_MIN_TRX || "10"),
       USDT: parseFloat(process.env.SWEEP_MIN_USDT || "1"),
       USDC: parseFloat(process.env.SWEEP_MIN_USDC || "1"),
+    },
+    // Tron energy rental — rent energy instead of pre-funding TRX
+    energyRental: {
+      enabled: process.env.TRON_ENERGY_RENTAL_ENABLED === "true",
+      energyAmount: parseInt(process.env.TRON_ENERGY_AMOUNT || "65000", 10),
+      durationSec: parseInt(process.env.TRON_ENERGY_DURATION_SEC || "600", 10),
+      tronsave: {
+        apiKey: process.env.TRONSAVE_API_KEY || "",
+        apiUrl:
+          process.env.TRONSAVE_API_URL || "https://api.tronsave.io/v2",
+      },
+      tronzap: {
+        apiKey: process.env.TRONZAP_API_KEY || "",
+        apiSecret: process.env.TRONZAP_API_SECRET || "",
+        apiUrl: process.env.TRONZAP_API_URL || "https://api.tronzap.com/v1",
+      },
+      tronenergyrent: {
+        apiKey: process.env.TRONENERGYRENT_API_KEY || "",
+        apiUrl:
+          process.env.TRONENERGYRENT_API_URL ||
+          "https://api.tronenergyrent.com",
+      },
+    },
+  },
+
+  // End-user authentication (phone/email/wallet/Google login for the app)
+  auth: {
+    jwt: {
+      accessSecret: process.env.JWT_ACCESS_SECRET || "",
+      accessExpiresInSec: parseInt(
+        process.env.JWT_ACCESS_EXPIRES_IN_SEC || "900",
+        10,
+      ), // 15 minutes
+      refreshExpiresInDays: parseInt(
+        process.env.JWT_REFRESH_EXPIRES_IN_DAYS || "30",
+        10,
+      ),
+    },
+
+    otp: {
+      codeLength: parseInt(process.env.OTP_CODE_LENGTH || "6", 10),
+      expiresInSec: parseInt(process.env.OTP_EXPIRES_IN_SEC || "300", 10), // 5 minutes
+      resendCooldownSec: parseInt(
+        process.env.OTP_RESEND_COOLDOWN_SEC || "60",
+        10,
+      ),
+      maxAttempts: parseInt(process.env.OTP_MAX_ATTEMPTS || "5", 10),
+    },
+
+    email: {
+      enabled: process.env.EMAIL_OTP_ENABLED === "true",
+      smtpHost: process.env.SMTP_HOST || "",
+      smtpPort: parseInt(process.env.SMTP_PORT || "587", 10),
+      smtpUser: process.env.SMTP_USER || "",
+      smtpPassword: process.env.SMTP_PASSWORD || "",
+      fromAddress: process.env.EMAIL_OTP_FROM || "no-reply@2settle.com",
+    },
+
+    sms: {
+      enabled: process.env.SMS_OTP_ENABLED === "true",
+      // "generic" (bring-your-own HTTP gateway), "africastalking", or "sendchamp"
+      provider: process.env.SMS_PROVIDER || "generic",
+      senderId: process.env.SMS_SENDER_ID || "2Settle",
+
+      // Generic HTTP gateway - point this at whichever SMS provider you use.
+      // gatewayUrl receives a POST with { to, message, senderId } as JSON,
+      // Authorization: Bearer <apiKey>.
+      gatewayUrl: process.env.SMS_GATEWAY_URL || "",
+      apiKey: process.env.SMS_GATEWAY_API_KEY || "",
+
+      africastalking: {
+        apiKey: process.env.AFRICASTALKING_API_KEY || "",
+        username: process.env.AFRICASTALKING_USERNAME || "",
+        baseUrl:
+          process.env.AFRICASTALKING_BASE_URL ||
+          "https://api.africastalking.com/version1/messaging",
+      },
+
+      sendchamp: {
+        apiKey: process.env.SENDCHAMP_API_KEY || "",
+        senderName: process.env.SENDCHAMP_SENDER_NAME || "2Settle",
+        // "dnd" (default, delivers to Do-Not-Disturb lines in Nigeria),
+        // "non_dnd", or "international"
+        route: process.env.SENDCHAMP_ROUTE || "dnd",
+        baseUrl:
+          process.env.SENDCHAMP_BASE_URL || "https://api.sendchamp.com/api/v1",
+      },
+    },
+
+    google: {
+      // Comma-separated for multi-platform support (web/iOS/Android each get
+      // their own OAuth client ID from Google, but all issue tokens your
+      // backend must accept).
+      clientIds: (process.env.GOOGLE_CLIENT_ID || "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean),
+    },
+
+    wallet: {
+      nonceExpiresInSec: parseInt(
+        process.env.WALLET_NONCE_EXPIRES_IN_SEC || "300",
+        10,
+      ), // 5 minutes
+      messageStatement:
+        process.env.WALLET_SIGN_MESSAGE || "Sign in to 2Settle",
     },
   },
 
@@ -223,6 +358,7 @@ export const config = {
       "/v1/admin/*",
       "/v1/webhooks/*",
       "/v1/auth/*",
+      "/v1/users/*",
       "/v1/payments/:reference",
       "/v1/reports/lookup",
       "/v1/reports/:reportId",

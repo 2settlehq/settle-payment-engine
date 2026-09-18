@@ -79,6 +79,31 @@ services:
       - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
       - IP_WHITELIST_ENABLED=${IP_WHITELIST_ENABLED:-true}
       - AUDIT_LOG_ENABLED=${AUDIT_LOG_ENABLED:-true}
+      # End-user auth (phone/email/wallet/Google login for /v1/users/*)
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}
+      - JWT_ACCESS_EXPIRES_IN_SEC=${JWT_ACCESS_EXPIRES_IN_SEC:-900}
+      - JWT_REFRESH_EXPIRES_IN_DAYS=${JWT_REFRESH_EXPIRES_IN_DAYS:-30}
+      - OTP_CODE_LENGTH=${OTP_CODE_LENGTH:-6}
+      - OTP_EXPIRES_IN_SEC=${OTP_EXPIRES_IN_SEC:-300}
+      - OTP_RESEND_COOLDOWN_SEC=${OTP_RESEND_COOLDOWN_SEC:-60}
+      - OTP_MAX_ATTEMPTS=${OTP_MAX_ATTEMPTS:-5}
+      - EMAIL_OTP_ENABLED=${EMAIL_OTP_ENABLED:-false}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - EMAIL_OTP_FROM=${EMAIL_OTP_FROM}
+      - SMS_OTP_ENABLED=${SMS_OTP_ENABLED:-false}
+      - SMS_PROVIDER=${SMS_PROVIDER:-generic}
+      - SMS_SENDER_ID=${SMS_SENDER_ID:-2Settle}
+      - SMS_GATEWAY_URL=${SMS_GATEWAY_URL}
+      - SMS_GATEWAY_API_KEY=${SMS_GATEWAY_API_KEY}
+      - AFRICASTALKING_API_KEY=${AFRICASTALKING_API_KEY}
+      - AFRICASTALKING_USERNAME=${AFRICASTALKING_USERNAME}
+      - AFRICASTALKING_BASE_URL=${AFRICASTALKING_BASE_URL:-https://api.africastalking.com/version1/messaging}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - WALLET_NONCE_EXPIRES_IN_SEC=${WALLET_NONCE_EXPIRES_IN_SEC:-300}
+      - WALLET_SIGN_MESSAGE=${WALLET_SIGN_MESSAGE:-Sign in to 2Settle}
     networks:
       - payment-network
     healthcheck:
@@ -116,6 +141,38 @@ services:
         node dist/scripts/run-rate-update.js >> /app/logs/rate-update.log 2>&1;
         sleep 1200;
       done"
+    healthcheck:
+      disable: true
+    volumes:
+      - ./backend/logs:/app/logs
+    networks:
+      - payment-network
+
+  rate-provider-fetcher:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: payment-rate-provider-fetcher
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=${DB_HOST:-mysql}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER:-root}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME:-2settle_db}
+      - RATE_FETCH_INTERVAL_MS=${RATE_FETCH_INTERVAL_MS:-30000}
+      # External rate providers (enable the ones you have keys for)
+      - BUSHA_RATE_ENABLED=${BUSHA_RATE_ENABLED:-false}
+      - BUSHA_API_KEY=${BUSHA_API_KEY}
+      - BUSHA_API_URL=${BUSHA_API_URL:-https://api.busha.co}
+      - LIQUIDRAMP_RATE_ENABLED=${LIQUIDRAMP_RATE_ENABLED:-false}
+      - LIQUIDRAMP_API_KEY=${LIQUIDRAMP_API_KEY}
+      - LIQUIDRAMP_API_URL=${LIQUIDRAMP_API_URL}
+      - ANCHOR_RATE_ENABLED=${ANCHOR_RATE_ENABLED:-false}
+      - ANCHOR_API_KEY=${ANCHOR_API_KEY}
+      - ANCHOR_API_URL=${ANCHOR_API_URL:-https://api.anchorfis.com}
+    command: node dist/scripts/run-rate-fetch.js
     healthcheck:
       disable: true
     volumes:

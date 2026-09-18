@@ -647,6 +647,29 @@ A summary row with totals (fiat volume, charges, net fiat, USD volume) is append
 }
 ```
 
+## End-User Authentication
+
+Separate from the merchant HMAC auth used by `/v1/payments` above, `/v1/users/*`
+is passwordless login for the end-user app (web/mobile): email/phone OTP,
+wallet signature (SIWE-style), or Google Sign-In. No HMAC headers needed —
+auth endpoints are public, and profile endpoints use a JWT bearer token.
+
+| Method | Endpoint | Description |
+|--------|----------|--------------|
+| Email/Phone OTP | `POST /v1/users/auth/otp/request` | Send a login code |
+| Email/Phone OTP | `POST /v1/users/auth/otp/verify` | Verify code, receive tokens |
+| Wallet | `POST /v1/users/auth/wallet/nonce` | Request a message to sign |
+| Wallet | `POST /v1/users/auth/wallet/verify` | Verify signature, receive tokens |
+| Google | `POST /v1/users/auth/google` | Verify a Google ID token, receive tokens |
+| Session | `POST /v1/users/auth/refresh` | Rotate a refresh token |
+| Session | `POST /v1/users/auth/logout` | Revoke one refresh token (single device) |
+| Session | `POST /v1/users/auth/logout-all` | Revoke every refresh token (Bearer JWT, all devices) |
+| Profile | `GET /v1/users/me` | Authenticated user profile + linked login methods |
+| Profile | `GET /v1/users/me/payments` | Payment history matched by verified phone identity |
+
+Full request/response examples, token lifetimes, and error codes are in the
+[Payment Engine Getting Started Guide → End-User Authentication](./backend/docs/PAYMENT_ENGINE_GETTING_STARTED.md#end-user-authentication).
+
 ## Documentation
 
 | Document | Description |
@@ -654,12 +677,15 @@ A summary row with totals (fiat volume, charges, net fiat, USD volume) is append
 | [Architecture](./backend/ARCHITECTURE.md) | System diagrams, state machines, and component overview |
 | [Design](./backend/DESIGN.md) | Merchant gateway and B2B integration design |
 | [Implementation Plan](./backend/IMPLEMENTATION.md) | Phased development roadmap |
+| [Payment Engine Guide](./backend/docs/PAYMENT_ENGINE_GETTING_STARTED.md) | Full payment API reference, integration guide, and end-user auth |
+| [WaaS Guide](./backend/docs/WAAS_GETTING_STARTED.md) | HD Wallet-as-a-Service integration guide |
 
 ## Features
 
 - **Five Transaction Types** - Transfer, Gift, Request, Merchant checkout, Bank confirmation rail
 - **Sandbox / Testnet Mode** - `pk_test_` keys with simulate-deposit endpoint for end-to-end testing without real crypto
-- **Rate Locking** - Freeze exchange rates during payment window
+- **Multi-Provider Rate Engine** - Compares quotes from Busha, LiquidRamp, Anchor, and the internal system rate each session; always locks the lowest (most conservative) rate. External APIs are polled by a background job every 30 seconds — never per transaction — so rate limits are not a concern at any volume
+- **Rate Locking** - Exchange rate frozen at session creation for the full payment window
 - **HD Wallet Derivation** - BIP32/44/84, unlimited unique deposit addresses
 - **Tiered Fees** - Configurable fee tiers based on transaction amount
 - **Multi-Chain** - Support for BTC, ETH, BNB, TRX, USDT and USDC (ERC20/BEP20/TRC20)
@@ -685,17 +711,20 @@ A summary row with totals (fiat volume, charges, net fiat, USD volume) is append
 │                                                              │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
 │  │   Session   │  │   Wallet    │  │   Rate    │ Charge  │ │
-│  │   Manager   │  │    Pool     │  │  Service  │ Calc    │ │
+│  │   Manager   │  │    Pool     │  │  Engine   │ Calc    │ │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                       Data Layer                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │   Sessions   │  │   Wallets    │  │      Rates       │  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+          │                                    │
+          ▼                          ▼ background job (30s)
+┌──────────────────────────┐   ┌──────────────────────────────┐
+│       Data Layer          │   │   External Rate Providers    │
+│  ┌────────┐  ┌─────────┐ │   │  ┌────────┐  ┌───────────┐  │
+│  │Sessions│  │  rates  │ │   │  │ Busha  │  │LiquidRamp │  │
+│  └────────┘  └─────────┘ │   │  └────────┘  └───────────┘  │
+│  ┌─────────────────────┐ │   │  ┌────────┐  + pluggable     │
+│  │   provider_rates    │◀┼───┘  │ Anchor │                  │
+│  └─────────────────────┘ │      └────────┘                  │
+└──────────────────────────┘   └──────────────────────────────┘
 ```
 
 ## Payment Session Lifecycle
