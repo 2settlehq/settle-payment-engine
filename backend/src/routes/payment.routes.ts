@@ -265,9 +265,8 @@ router.post(
  * a session, wallet, or any DB record, and needs no payer/receiver, so it
  * can be called before the caller has an end-user session.
  *
- * Estimates include a 1% conversion fee plus the flat processing fee.
- * Both fee fields are returned in fiat currency; the crypto total includes both.
- * Final payment fees are still determined by the payment-creation flow.
+ * Uses the same fee rules as payment creation (currently no charges), so the
+ * fee fields are returned as 0 in fiat currency.
  */
 router.post(
   '/estimate',
@@ -287,8 +286,8 @@ router.post(
       const rateLock = await lockRate(crypto, fiatCurrency);
       const charges =
         fiatAmount === undefined && cryptoAmount !== undefined
-          ? calculateChargesFromCrypto(cryptoAmount, crypto, rateLock, undefined, 0.01)
-          : calculateCharges(fiatAmount!, crypto, rateLock, undefined, chargeFrom, 0.01);
+          ? calculateChargesFromCrypto(cryptoAmount, crypto, rateLock)
+          : calculateCharges(fiatAmount!, crypto, rateLock, undefined, chargeFrom);
 
       return res.json({
         success: true,

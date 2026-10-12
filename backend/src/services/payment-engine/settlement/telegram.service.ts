@@ -21,11 +21,13 @@ interface ReceiverAlertData {
   bankName?: string;
 }
 
+type TelegramInlineKeyboardButton =
+  | { text: string; callback_data: string }
+  // Copies `copy_text.text` to the clipboard on tap (Bot API 7.11+)
+  | { text: string; copy_text: { text: string } };
+
 interface TelegramInlineKeyboardMarkup {
-  inline_keyboard: Array<Array<{
-    text: string;
-    callback_data: string;
-  }>>;
+  inline_keyboard: TelegramInlineKeyboardButton[][];
 }
 
 export class TelegramService {
@@ -172,7 +174,7 @@ export class TelegramService {
     error: string
   ): Promise<boolean> {
     const message = this.formatSettlementFailure(session, receiver, error);
-    return this.sendMessage(message, this.manualSettlementKeyboard(session.reference));
+    return this.sendMessage(message, this.manualSettlementKeyboard(session, receiver));
   }
 
   /**
@@ -203,22 +205,20 @@ export class TelegramService {
     const accountNumber = this.escapeHtml(receiver.accountNumber);
     const accountName = this.escapeHtml(receiver.accountName);
 
-    // <pre> renders each value as a shaded block with a Copy button in Telegram
+    // <code> values copy individually on tap; the Copy buttons below copy
+    // the exact value on every client, regardless of how the text is selected
     return `
 <b>Manual Settlement Required</b>
 
 <b>Session:</b> ${reference}
-<b>Amount (${fiatCurrency}):</b>
-<pre>${amount}</pre>
-<b>Account:</b>
-<pre>${accountNumber}</pre>
-<b>Bank:</b>
-<pre>${bankDisplay}</pre>
+<b>Amount (${fiatCurrency}):</b> <code>${amount}</code>
+<b>Account:</b> <code>${accountNumber}</code>
+<b>Bank:</b> <code>${bankDisplay}</code>
 <b>Name:</b> ${accountName}
 
 <b>Error:</b> ${this.escapeHtml(error)}
 
-After manual payment, use the buttons below.
+Use the Copy buttons below, then mark the settlement completed after manual payment.
     `.trim();
   }
 
@@ -258,11 +258,27 @@ After manual payment, use the buttons below.
       .replace(/>/g, '&gt;');
   }
 
-  private manualSettlementKeyboard(reference: string): TelegramInlineKeyboardMarkup {
+  manualSettlementKeyboard(
+    session: SessionAlertData,
+    receiver: ReceiverAlertData
+  ): TelegramInlineKeyboardMarkup {
+    // copy_text payloads are plain text (not HTML) and capped at 256 chars
+    const copyButton = (label: string, value: string) => ({
+      text: label,
+      copy_text: { text: value.slice(0, 256) },
+    });
+
     return {
       inline_keyboard: [
         [
-          { text: 'Settlement completed', callback_data: `settle:${reference}` },
+          copyButton('Copy amount', String(session.fiatAmount)),
+          copyButton('Copy account', receiver.accountNumber),
+        ],
+        [
+          copyButton('Copy bank', receiver.bankName || receiver.bankCode),
+        ],
+        [
+          { text: 'Settlement completed', callback_data: `settle:${session.reference}` },
         ],
       ],
     };

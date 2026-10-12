@@ -11,6 +11,7 @@ import {
   getFiatCharge,
   fiatChargeToCrypto,
   calculateCharges,
+  calculateChargesFromCrypto,
   formatCryptoAmount,
   getCryptoAmountDecimals,
   roundCryptoAmount,
@@ -18,6 +19,7 @@ import {
   validateAmount,
   DEFAULT_FEE_TIERS,
   AMOUNT_LIMITS,
+  FeeTier,
 } from '@/services/payment-engine/charges/charge-calculator';
 import { RateLock } from '@/services/payment-engine/types';
 import { InvalidInputError } from '@/services/payment-engine/errors';
@@ -38,6 +40,17 @@ function createMockRateLock(rate: number = 1600, assetPrice: number = 95000): Ra
     expiresAt: new Date(now.getTime() + 30 * 60 * 1000),
   };
 }
+
+/**
+ * Previous paid fee schedule. DEFAULT_FEE_TIERS is currently all-zero (no
+ * charges), so fee-math tests pass this explicitly to keep coverage of how
+ * a non-zero fee is applied.
+ */
+const PAID_FEE_TIERS: FeeTier[] = [
+  { maxAmount: 100_000, feeAmount: 500, name: 'basic' },
+  { maxAmount: 1_000_000, feeAmount: 1_000, name: 'standard' },
+  { maxAmount: 2_000_000, feeAmount: 1_500, name: 'premium' },
+];
 
 // ===========================================================================
 // TESTS
@@ -72,26 +85,26 @@ describe('Charge Calculator', () => {
     });
 
     it('should return correct fee amounts for each tier', () => {
-      expect(getFeeTier(50000).feeAmount).toBe(500);
-      expect(getFeeTier(500000).feeAmount).toBe(1000);
-      expect(getFeeTier(1500000).feeAmount).toBe(1500);
+      expect(getFeeTier(50000, PAID_FEE_TIERS).feeAmount).toBe(500);
+      expect(getFeeTier(500000, PAID_FEE_TIERS).feeAmount).toBe(1000);
+      expect(getFeeTier(1500000, PAID_FEE_TIERS).feeAmount).toBe(1500);
     });
 
     it('should handle edge cases at tier boundaries', () => {
       // At exactly 100,000 -> basic
-      expect(getFeeTier(100000).feeAmount).toBe(500);
+      expect(getFeeTier(100000, PAID_FEE_TIERS).feeAmount).toBe(500);
 
       // At exactly 100,001 -> standard
-      expect(getFeeTier(100001).feeAmount).toBe(1000);
+      expect(getFeeTier(100001, PAID_FEE_TIERS).feeAmount).toBe(1000);
 
       // At exactly 1,000,000 -> standard
-      expect(getFeeTier(1000000).feeAmount).toBe(1000);
+      expect(getFeeTier(1000000, PAID_FEE_TIERS).feeAmount).toBe(1000);
 
       // At exactly 1,000,001 -> premium
-      expect(getFeeTier(1000001).feeAmount).toBe(1500);
+      expect(getFeeTier(1000001, PAID_FEE_TIERS).feeAmount).toBe(1500);
 
       // At exactly 2,000,000 -> premium (max limit)
-      expect(getFeeTier(2000000).feeAmount).toBe(1500);
+      expect(getFeeTier(2000000, PAID_FEE_TIERS).feeAmount).toBe(1500);
 
       // Above 2,000,000 -> error
       expect(() => getFeeTier(2000001)).toThrow(InvalidInputError);
@@ -167,20 +180,26 @@ describe('Charge Calculator', () => {
 
   describe('getFiatCharge', () => {
     it('should return ₦500 for amounts <= 100,000', () => {
-      expect(getFiatCharge(50000)).toBe(500);
-      expect(getFiatCharge(100000)).toBe(500);
+      expect(getFiatCharge(50000, PAID_FEE_TIERS)).toBe(500);
+      expect(getFiatCharge(100000, PAID_FEE_TIERS)).toBe(500);
     });
 
     it('should return ₦1,000 for amounts 100,001 - 1,000,000', () => {
-      expect(getFiatCharge(100001)).toBe(1000);
-      expect(getFiatCharge(500000)).toBe(1000);
-      expect(getFiatCharge(1000000)).toBe(1000);
+      expect(getFiatCharge(100001, PAID_FEE_TIERS)).toBe(1000);
+      expect(getFiatCharge(500000, PAID_FEE_TIERS)).toBe(1000);
+      expect(getFiatCharge(1000000, PAID_FEE_TIERS)).toBe(1000);
     });
 
     it('should return ₦1,500 for amounts 1,000,001 - 2,000,000', () => {
-      expect(getFiatCharge(1000001)).toBe(1500);
-      expect(getFiatCharge(1500000)).toBe(1500);
-      expect(getFiatCharge(2000000)).toBe(1500);
+      expect(getFiatCharge(1000001, PAID_FEE_TIERS)).toBe(1500);
+      expect(getFiatCharge(1500000, PAID_FEE_TIERS)).toBe(1500);
+      expect(getFiatCharge(2000000, PAID_FEE_TIERS)).toBe(1500);
+    });
+
+    it('should return ₦0 with the default (no-charge) tiers', () => {
+      expect(getFiatCharge(50000)).toBe(0);
+      expect(getFiatCharge(500000)).toBe(0);
+      expect(getFiatCharge(2000000)).toBe(0);
     });
 
     it('should throw for amounts > 2,000,000', () => {
@@ -259,7 +278,7 @@ describe('Charge Calculator', () => {
   describe('calculateCharges', () => {
     it('should calculate all charge components for USDT', () => {
       const rateLock = createMockRateLock(1600, 1);
-      const result = calculateCharges(50000, 'USDT', rateLock);
+      const result = calculateCharges(50000, 'USDT', rateLock, PAID_FEE_TIERS);
 
       expect(result.fiatCharge).toBe(500);
       expect(result.tierName).toBe('basic');
@@ -274,7 +293,7 @@ describe('Charge Calculator', () => {
 
     it('should calculate all charge components for BTC', () => {
       const rateLock = createMockRateLock(1600, 95000);
-      const result = calculateCharges(50000, 'BTC', rateLock);
+      const result = calculateCharges(50000, 'BTC', rateLock, PAID_FEE_TIERS);
 
       expect(result.fiatCharge).toBe(500);
       expect(result.tierName).toBe('basic');
@@ -288,7 +307,7 @@ describe('Charge Calculator', () => {
 
     it('should use standard tier for 500,000 NGN', () => {
       const rateLock = createMockRateLock(1600, 1);
-      const result = calculateCharges(500000, 'USDT', rateLock);
+      const result = calculateCharges(500000, 'USDT', rateLock, PAID_FEE_TIERS);
 
       expect(result.fiatCharge).toBe(1000);
       expect(result.tierName).toBe('standard');
@@ -296,7 +315,7 @@ describe('Charge Calculator', () => {
 
     it('should use premium tier for 2,000,000 NGN', () => {
       const rateLock = createMockRateLock(1600, 1);
-      const result = calculateCharges(2000000, 'USDT', rateLock);
+      const result = calculateCharges(2000000, 'USDT', rateLock, PAID_FEE_TIERS);
 
       expect(result.fiatCharge).toBe(1500);
       expect(result.tierName).toBe('premium');
@@ -304,7 +323,7 @@ describe('Charge Calculator', () => {
 
     it('should work with ETH', () => {
       const rateLock = createMockRateLock(1600, 3500);
-      const result = calculateCharges(100000, 'ETH', rateLock);
+      const result = calculateCharges(100000, 'ETH', rateLock, PAID_FEE_TIERS);
 
       expect(result.fiatCharge).toBe(500);
 
@@ -400,10 +419,10 @@ describe('Charge Calculator', () => {
       expect(DEFAULT_FEE_TIERS[2].maxAmount).toBe(2000000);
     });
 
-    it('should have correct fee amounts', () => {
-      expect(DEFAULT_FEE_TIERS[0].feeAmount).toBe(500);
-      expect(DEFAULT_FEE_TIERS[1].feeAmount).toBe(1000);
-      expect(DEFAULT_FEE_TIERS[2].feeAmount).toBe(1500);
+    it('should charge nothing on every tier', () => {
+      expect(DEFAULT_FEE_TIERS[0].feeAmount).toBe(0);
+      expect(DEFAULT_FEE_TIERS[1].feeAmount).toBe(0);
+      expect(DEFAULT_FEE_TIERS[2].feeAmount).toBe(0);
     });
 
     it('should have descriptive names', () => {
@@ -428,34 +447,52 @@ describe('Charge Calculator', () => {
   });
 });
 
-describe('Estimate fee policy: one percent conversion fee', () => {
+describe('No-charge policy (default tiers, no percentage fee)', () => {
   it.each(['USDT', 'BTC', 'ETH', 'BNB', 'TRX'] as const)(
-    'returns conversion and processing fees in naira for %s',
+    'charges nothing and asks for the exact locked-rate crypto for %s',
     (crypto) => {
-      const result = calculateCharges(50000, crypto, createMockRateLock(), undefined, 'crypto', 0.01);
-      expect(result.percentageFiatCharge).toBeCloseTo(500, 8);
-      expect(result.flatFiatCharge).toBe(500);
-      expect(result.fiatCharge).toBeCloseTo(1000, 8);
+      const result = calculateCharges(50000, crypto, createMockRateLock());
+      expect(result.fiatCharge).toBe(0);
+      expect(result.cryptoCharge).toBe(0);
+      expect(result.flatFiatCharge).toBe(0);
+      expect(result.percentageFiatCharge).toBe(0);
       expect(result.netFiatAmount).toBe(50000);
-      const expectedCrypto = crypto === 'USDT' ? 31.88 :
-        roundCryptoAmount(51000 / 1600 / 95000, crypto);
+      const expectedCrypto = crypto === 'USDT' ? 31.25 :
+        roundCryptoAmount(50000 / 1600 / 95000, crypto);
       expect(result.totalCryptoAmount).toBe(expectedCrypto);
     }
   );
 
+  it('gives the same result whether the charge is taken from fiat or crypto', () => {
+    const fromCrypto = calculateCharges(500000, 'USDT', createMockRateLock(), undefined, 'crypto');
+    const fromFiat = calculateCharges(500000, 'USDT', createMockRateLock(), undefined, 'fiat');
+    expect(fromFiat.netFiatAmount).toBe(500000);
+    expect(fromFiat.totalCryptoAmount).toBe(fromCrypto.totalCryptoAmount);
+  });
+
+  it('pays out the full fiat value of a crypto-first amount', () => {
+    const result = calculateChargesFromCrypto(100, 'USDT', createMockRateLock());
+    expect(result.derivedFiatAmount).toBe(160000);
+    expect(result.netFiatAmount).toBe(160000);
+    expect(result.fiatCharge).toBe(0);
+    expect(result.totalCryptoAmount).toBe(100);
+  });
+
+  it('retains server amount limits', () => {
+    for (const amount of [0.5, 2000001]) {
+      expect(() => calculateCharges(amount, 'USDT', createMockRateLock()))
+        .toThrow(InvalidInputError);
+    }
+  });
+});
+
+describe('Percentage fee mechanics (paid tiers + 1%)', () => {
   it.each([[100000, 1000, 500], [500000, 5000, 1000], [2000000, 20000, 1500]])(
-    'keeps the tiered processing fee for a naira amount of %s',
+    'adds the percentage fee on top of the tiered fee for %s',
     (amount, conversionFee, processingFee) => {
-      const result = calculateCharges(amount, 'USDT', createMockRateLock(), undefined, 'crypto', 0.01);
+      const result = calculateCharges(amount, 'USDT', createMockRateLock(), PAID_FEE_TIERS, 'crypto', 0.01);
       expect(result.percentageFiatCharge).toBeCloseTo(conversionFee, 8);
       expect(result.flatFiatCharge).toBe(processingFee);
     }
   );
-
-  it('retains server amount limits', () => {
-    for (const amount of [0.5, 2000001]) {
-      expect(() => calculateCharges(amount, 'USDT', createMockRateLock(), undefined, 'crypto', 0.01))
-        .toThrow(InvalidInputError);
-    }
-  });
 });

@@ -34,20 +34,22 @@ export const AMOUNT_LIMITS = {
   MAX: 2_000_000,
 } as const;
 
+// Transactions are currently free: every tier charges 0. Restore feeAmount
+// values here (previously 500 / 1,000 / 1,500) to re-enable the flat fee.
 export const DEFAULT_FEE_TIERS: FeeTier[] = [
   {
     maxAmount: 100_000,
-    feeAmount: 500,
+    feeAmount: 0,
     name: 'basic',
   },
   {
     maxAmount: 1_000_000,
-    feeAmount: 1_000,
+    feeAmount: 0,
     name: 'standard',
   },
   {
     maxAmount: 2_000_000,
-    feeAmount: 1_500,
+    feeAmount: 0,
     name: 'premium',
   },
 ];
