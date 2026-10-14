@@ -84,6 +84,7 @@ export class ParticipantService {
       });
 
       if (receiverByIdentity) {
+        await this.backfillBankDetails(receiverByIdentity, receiver);
         return receiverByIdentity;
       }
 
@@ -97,6 +98,25 @@ export class ParticipantService {
 
       if (rows && rows.length > 0) {
         return rows[0].id;
+      }
+
+      // Legacy receivers (created by the Telegram bot routes) store bank_name but
+      // no bank_code. Reuse one for this account if the bank or account name
+      // matches the NUBAN-resolved details, and fill in its bank_code.
+      const [legacyRows] = await pool.query(
+        `SELECT id FROM receivers
+         WHERE bank_account = ?
+           AND (bank_code IS NULL OR bank_code = '')
+           AND (LOWER(bank_name) = LOWER(?) OR LOWER(account_name) = LOWER(?))
+         ORDER BY id ASC
+         LIMIT 1`,
+        [receiver.accountNumber, receiver.bankName ?? '', receiver.accountName ?? '']
+      ) as [any[], any];
+
+      if (legacyRows && legacyRows.length > 0) {
+        const legacyId = Number(legacyRows[0].id);
+        await this.backfillBankDetails(legacyId, receiver);
+        return legacyId;
       }
 
       const [result] = await pool.query(
@@ -117,6 +137,27 @@ export class ParticipantService {
       console.error('[ParticipantService] Receiver error:', error.message, error.code);
       throw error;
     }
+  }
+
+  /**
+   * If an existing receiver has no bank_code, fill in its bank details from the
+   * (NUBAN-resolved) receiver input so settlement has a bank to pay out to.
+   * Receivers that already have a bank_code are left untouched.
+   */
+  private async backfillBankDetails(receiverId: number, receiver: ReceiverInput): Promise<void> {
+    if (!receiver.bankCode || !receiver.accountNumber) return;
+
+    const existing = await this.getReceiver(receiverId);
+    if (!existing || existing.bankCode) return;
+
+    await this.updateReceiver(receiverId, {
+      bankCode: receiver.bankCode,
+      bankName: receiver.bankName,
+      accountNumber: receiver.accountNumber,
+      accountName: receiver.accountName,
+    });
+
+    console.log(`[ParticipantService] Backfilled bank_code for receiver ${receiverId}`);
   }
 
   /**
@@ -239,8 +280,12 @@ export class ParticipantService {
     const values: any[] = [];
 
     if (updates.bankCode !== undefined) {
-      fields.push('bank_name = ?');
+      fields.push('bank_code = ?');
       values.push(updates.bankCode);
+    }
+    if (updates.bankName !== undefined) {
+      fields.push('bank_name = ?');
+      values.push(updates.bankName);
     }
     if (updates.accountNumber !== undefined) {
       fields.push('bank_account = ?');

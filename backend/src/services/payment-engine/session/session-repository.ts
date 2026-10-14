@@ -42,6 +42,7 @@ export interface CreateSessionData {
   expiresAt: Date;
   metadata?: Record<string, unknown>;
   bankRef?: string;
+  description?: string;
   isSandbox?: boolean;
 }
 
@@ -116,6 +117,7 @@ function rowToSession(row: any): PaymentSession {
         : row.metadata
       : undefined,
     bankRef: row.bank_ref || undefined,
+    description: row.description || undefined,
     isSandbox: Boolean(row.is_sandbox),
   };
 }
@@ -135,8 +137,8 @@ export class SessionRepository {
           funding_wallet_index, parent_wallet,
           payer_id, receiver_id, session_owner_id, merchant_id, api_key_id, is_sandbox,
           expires_at, created_at, updated_at,
-          metadata, bank_ref
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          metadata, bank_ref, description
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.id,
           data.reference,
@@ -169,6 +171,7 @@ export class SessionRepository {
           now,
           data.metadata ? JSON.stringify(data.metadata) : null,
           data.bankRef ?? null,
+          data.description ?? null,
         ]
       );
 

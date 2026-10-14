@@ -282,6 +282,7 @@ export class SessionManager {
         expiresAt,
         metadata: resolvedInput.metadata,
         bankRef: resolvedInput.bankRef,
+        description: resolvedInput.description,
         isSandbox: resolvedInput.isSandbox,
       };
 
@@ -383,6 +384,7 @@ export class SessionManager {
       expiresAt,
       metadata: resolvedInput.metadata,
       bankRef: resolvedInput.bankRef,
+      description: resolvedInput.description,
       isSandbox: resolvedInput.isSandbox,
     };
 

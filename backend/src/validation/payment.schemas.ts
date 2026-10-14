@@ -75,6 +75,8 @@ const basePaymentSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
   /** Bank's own internal transaction reference (bank_confirmation type only) */
   bankRef: z.string().max(100).optional(),
+  /** Free-text note about the payment; also appended to the payout bank narration */
+  description: z.string().trim().max(255).optional(),
   /**
    * Required for transfer and gift. Controls which side bears the platform fee.
    * 'fiat'   — charge deducted from fiat payout; receiver gets fiatAmount - charge.

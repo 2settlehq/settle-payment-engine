@@ -29,6 +29,17 @@ interface ReceiverRow extends RowDataPacket {
   bank_name?: string;
 }
 
+/** Bank transfer narrations are commonly capped at 100 characters (NIP). */
+const MAX_NARRATION_LENGTH = 100;
+
+/** "2Settle <ref>" plus the payment description, trimmed to fit the bank's narration limit. */
+function buildNarration(reference: string, description: string | null): string {
+  const base = `2Settle ${reference}`;
+  const note = description?.replace(/\s+/g, ' ').trim();
+  if (!note) return base;
+  return `${base} ${note}`.slice(0, MAX_NARRATION_LENGTH).trim();
+}
+
 interface ReceiverData {
   accountNumber: string;
   bankCode: string;
@@ -46,6 +57,7 @@ interface SessionRow extends RowDataPacket {
   receiver_id: number | null;
   api_key_id: number | null;
   is_sandbox: boolean;
+  description: string | null;
   settlement_token: string | null;
   settlement_token_expires_at: Date | null;
 }
@@ -154,7 +166,7 @@ export class SettlementService {
       return;
     }
 
-    const narration = `2Settle ${session.reference}`;
+    const narration = buildNarration(session.reference, session.description);
 
     // 5. Route to whichever enabled provider has enough balance to cover this
     // payout, preferring the one with the highest balance. Falls through to
@@ -432,7 +444,7 @@ export class SettlementService {
 
   private async getSession(sessionId: string): Promise<SessionRow | null> {
     const [rows] = await pool.execute<SessionRow[]>(
-      `SELECT id, reference, status, fiat_amount, settled_fiat_amount, fiat_currency, receiver_id, api_key_id, is_sandbox
+      `SELECT id, reference, status, fiat_amount, settled_fiat_amount, fiat_currency, receiver_id, api_key_id, is_sandbox, description
        FROM payment_sessions WHERE id = ?`,
       [sessionId]
     );

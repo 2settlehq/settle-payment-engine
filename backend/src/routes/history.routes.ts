@@ -68,7 +68,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
     const sql = `
       SELECT date, transaction_type, transac_id, amount_payable,
-             crypto_amount, crypto, current_rate, charges, display_status
+             crypto_amount, crypto, current_rate, charges, display_status, description
       FROM (
 
         SELECT
@@ -80,7 +80,8 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           t.crypto,
           t.current_rate,
           t.charges,
-          s.status              AS display_status
+          s.status              AS display_status,
+          NULL                  AS description
         FROM summaries s
         LEFT JOIN transfers t ON s.transaction_id = t.id
         ${buildPayerJoin('t')}
@@ -98,7 +99,8 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           g.crypto,
           g.current_rate,
           g.charges,
-          s.status              AS display_status
+          s.status              AS display_status,
+          NULL                  AS description
         FROM summaries s
         LEFT JOIN gifts g ON s.transaction_id = g.id
         ${buildPayerJoin('g')}
@@ -116,7 +118,8 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
           r.crypto,
           r.current_rate,
           r.charges,
-          s.status              AS display_status
+          s.status              AS display_status,
+          NULL                  AS description
         FROM summaries s
         LEFT JOIN requests r ON s.transaction_id = r.id
         ${buildPayerJoin('r')}
@@ -140,7 +143,8 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
             WHEN 'failed'              THEN 'UnSuccessful'
             WHEN 'settlement_reversed' THEN 'UnSuccessful'
             ELSE 'Processing'
-          END                   AS display_status
+          END                   AS display_status,
+          ps.description        AS description
         FROM payment_sessions ps
         ${enginePayerJoin}
 
