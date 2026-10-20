@@ -75,6 +75,8 @@ const basePaymentSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
   /** Bank's own internal transaction reference (bank_confirmation type only) */
   bankRef: z.string().max(100).optional(),
+  /** Free-text note about the payment; also appended to the payout bank narration */
+  description: z.string().trim().max(255).optional(),
   /**
    * Required for transfer and gift. Controls which side bears the platform fee.
    * 'fiat'   — charge deducted from fiat payout; receiver gets fiatAmount - charge.
@@ -304,19 +306,41 @@ export const createPaymentSchema = basePaymentSchema.superRefine((data, ctx) => 
 
 /**
  * Sessionless payment estimate — no payer/receiver, no session created.
- * Shows the crypto amount + fee breakdown for a fiat amount before the
- * caller has an end-user session. Same crypto/network compatibility rules
- * as createPaymentSchema.
+ * Shows the crypto amount + fee breakdown for either a fiat amount (fiat-first)
+ * or a crypto amount (crypto-first — fiatAmount is derived) before the caller
+ * has an end-user session. Same crypto/network compatibility rules as
+ * createPaymentSchema. If both fiatAmount and cryptoAmount are given, fiatAmount
+ * takes precedence (matches createPaymentSchema/session-manager convention).
  */
 export const estimatePaymentSchema = z
   .object({
-    fiatAmount: z.number().positive('Fiat amount must be positive'),
+    fiatAmount: z.number().positive('Fiat amount must be positive').optional(),
+    cryptoAmount: z.number().positive('Crypto amount must be positive').optional(),
     fiatCurrency: z.enum(FIAT_CURRENCIES).default('NGN'),
     crypto: z.enum(CRYPTO_CURRENCIES),
     network: z.enum(NETWORKS),
     chargeFrom: z.enum(['fiat', 'crypto']).default('crypto'),
   })
   .superRefine((data, ctx) => {
+    const hasFiat = data.fiatAmount !== undefined;
+    const hasCrypto = data.cryptoAmount !== undefined;
+
+    if (!hasFiat && !hasCrypto) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Either fiatAmount or cryptoAmount is required',
+        path: ['fiatAmount'],
+      });
+    }
+
+    if (!hasFiat && hasCrypto && data.chargeFrom === 'fiat') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "chargeFrom cannot be 'fiat' when cryptoAmount is provided — crypto-first estimates always charge from crypto",
+        path: ['chargeFrom'],
+      });
+    }
+
     const validNetworks: Record<string, string[]> = {
       BTC: ['bitcoin'],
       ETH: ['ethereum'],

@@ -25,7 +25,7 @@ import { bankService } from '../services/bank/bank.service';
 import { sessionManager } from '../services/payment-engine/session/session-manager';
 import { sendPaymentWebhook } from '../services/payment-engine/payment-webhook.service';
 import { lockRate } from '../services/payment-engine/rate';
-import { calculateCharges } from '../services/payment-engine/charges';
+import { calculateCharges, calculateChargesFromCrypto } from '../services/payment-engine/charges';
 
 const router = Router();
 
@@ -138,6 +138,7 @@ router.post(
       callbackUrl: input.callbackUrl,
       metadata: input.metadata,
       bankRef: input.bankRef,
+      description: input.description,
       chargeFrom: input.chargeFrom,
       apiKeyId: apiKey?.id,
       fundingWalletIndex: apiKey?.fundingWalletIndex ?? undefined,
@@ -229,6 +230,7 @@ router.post(
         fiatAmount: updatedSession.fiatAmount,
         settledFiatAmount: updatedSession.settledFiatAmount,
         fiatCurrency: updatedSession.fiatCurrency,
+        description: updatedSession.description ?? null,
         transactionUsd,
         rate: updatedSession.rate,
         charge: chargeBreakdown,
@@ -265,10 +267,8 @@ router.post(
  * a session, wallet, or any DB record, and needs no payer/receiver, so it
  * can be called before the caller has an end-user session.
  *
- * The percentage "first transaction" fee (see session-manager.ts) requires
- * a known session owner and isn't applied here — this always estimates
- * against the base flat fee tier; the real fee is finalized when the
- * payment is actually created.
+ * Uses the same fee rules as payment creation (currently no charges), so the
+ * fee fields are returned as 0 in fiat currency.
  */
 router.post(
   '/estimate',
@@ -283,10 +283,13 @@ router.post(
         });
       }
 
-      const { fiatAmount, fiatCurrency, crypto, network, chargeFrom } = parsed.data;
+      const { fiatAmount, cryptoAmount, fiatCurrency, crypto, network, chargeFrom } = parsed.data;
 
       const rateLock = await lockRate(crypto, fiatCurrency);
-      const charges = calculateCharges(fiatAmount, crypto, rateLock, undefined, chargeFrom, 0);
+      const charges =
+        fiatAmount === undefined && cryptoAmount !== undefined
+          ? calculateChargesFromCrypto(cryptoAmount, crypto, rateLock)
+          : calculateCharges(fiatAmount!, crypto, rateLock, undefined, chargeFrom);
 
       return res.json({
         success: true,
@@ -413,6 +416,7 @@ router.get(
         network: session.network,
         fiatAmount: session.fiatAmount,
         fiatCurrency: session.fiatCurrency,
+        description: session.description ?? null,
         rate: session.rate,
         txHash: session.txHash,
         confirmations: session.confirmations,
@@ -631,6 +635,7 @@ router.post(
           fiatAmount: updatedSession.fiatAmount,
           settledFiatAmount: updatedSession.settledFiatAmount,
           fiatCurrency: updatedSession.fiatCurrency,
+          description: updatedSession.description ?? null,
           transactionUsd: updatedSession.transactionUsd ?? null,
           rate: updatedSession.rate,
           charge: fulfillChargeBreakdown,

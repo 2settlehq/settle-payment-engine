@@ -34,20 +34,22 @@ export const AMOUNT_LIMITS = {
   MAX: 2_000_000,
 } as const;
 
+// Transactions are currently free: every tier charges 0. Restore feeAmount
+// values here (previously 500 / 1,000 / 1,500) to re-enable the flat fee.
 export const DEFAULT_FEE_TIERS: FeeTier[] = [
   {
     maxAmount: 100_000,
-    feeAmount: 500,
+    feeAmount: 0,
     name: 'basic',
   },
   {
     maxAmount: 1_000_000,
-    feeAmount: 1_000,
+    feeAmount: 0,
     name: 'standard',
   },
   {
     maxAmount: 2_000_000,
-    feeAmount: 1_500,
+    feeAmount: 0,
     name: 'premium',
   },
 ];
@@ -207,29 +209,53 @@ export function calculateChargesFromCrypto(
   tiers: FeeTier[] = DEFAULT_FEE_TIERS,
   percentageFeeRate: number = 0
 ): ChargeResult & { derivedFiatAmount: number } {
-  // Step 1: gross fiat equivalent of the full crypto amount
-  const grossFiat = isStablecoin(crypto)
-    ? cryptoAmount * rateLock.rate
-    : cryptoAmount * (rateLock.assetPrice ?? 1) * rateLock.rate;
+  try {
+    // Step 1: gross fiat equivalent of the full crypto amount
+    const grossFiat = isStablecoin(crypto)
+      ? cryptoAmount * rateLock.rate
+      : cryptoAmount * (rateLock.assetPrice ?? 1) * rateLock.rate;
 
-  const feeDivisor = percentageFeeRate > 0 ? 1 + percentageFeeRate : 1;
+    const feeDivisor = percentageFeeRate > 0 ? 1 + percentageFeeRate : 1;
 
-  // Steps 2–3: first fee estimate (rough estimate for tier lookup)
-  const roughFiat = grossFiat / feeDivisor;
-  const tier1 = getFeeTier(roughFiat, tiers);
-  const netFiat1 = (grossFiat - tier1.feeAmount) / feeDivisor;
+    // Steps 2–3: first fee estimate (rough estimate for tier lookup)
+    const roughFiat = grossFiat / feeDivisor;
+    const tier1 = getFeeTier(roughFiat, tiers);
+    const netFiat1 = (grossFiat - tier1.feeAmount) / feeDivisor;
 
-  // Steps 4–5: one correction pass (handles tier boundary crossover)
-  const tier2 = getFeeTier(netFiat1, tiers);
-  const netFiat = (grossFiat - tier2.feeAmount) / feeDivisor;
+    // Steps 4–5: one correction pass (handles tier boundary crossover)
+    const tier2 = getFeeTier(netFiat1, tiers);
+    const netFiat = (grossFiat - tier2.feeAmount) / feeDivisor;
 
-  // Step 6: validate derived fiat is within engine limits
-  validateAmount(netFiat);
+    // Step 6: validate derived fiat is within engine limits
+    validateAmount(netFiat);
 
-  // Step 7: canonical forward calculation — crypto-first always uses chargeFrom:'crypto'
-  const result = calculateCharges(netFiat, crypto, rateLock, tiers, 'crypto', percentageFeeRate);
+    // Step 7: canonical forward calculation — crypto-first always uses chargeFrom:'crypto'
+    const result = calculateCharges(netFiat, crypto, rateLock, tiers, 'crypto', percentageFeeRate);
 
-  return { ...result, derivedFiatAmount: netFiat };
+    return { ...result, derivedFiatAmount: netFiat };
+  } catch (err) {
+    // getFeeTier()/validateAmount() throw in terms of the fiat equivalent (₦),
+    // which is meaningless to a caller who only knows the crypto amount they
+    // sent. Re-express the same limit boundary in the crypto they asked about.
+    if (err instanceof InvalidInputError) {
+      const exceedsMax = (err.value as number) > AMOUNT_LIMITS.MAX;
+      const limitFiat = exceedsMax ? AMOUNT_LIMITS.MAX : AMOUNT_LIMITS.MIN;
+      const limitCrypto = roundCryptoAmount(
+        isStablecoin(crypto)
+          ? limitFiat / rateLock.rate
+          : limitFiat / (rateLock.assetPrice ?? 1) / rateLock.rate,
+        crypto
+      );
+      throw new InvalidInputError(
+        exceedsMax
+          ? `Amount exceeds maximum limit. Maximum is ${limitCrypto} ${crypto}.`
+          : `Amount is too small. Minimum is ${limitCrypto} ${crypto}.`,
+        'cryptoAmount',
+        cryptoAmount
+      );
+    }
+    throw err;
+  }
 }
 
 export function formatCryptoAmount(

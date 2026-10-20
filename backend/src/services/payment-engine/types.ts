@@ -94,6 +94,8 @@ export interface CreatePaymentInput {
   metadata?: Record<string, unknown>;
   /** Bank's own internal transaction reference (bank_confirmation type only) */
   bankRef?: string;
+  /** Free-text note about the payment, set at creation */
+  description?: string;
   /**
    * Transfer only. Controls which side bears the platform fee.
    * 'fiat'   — charge deducted from fiat payout; receiver gets fiatAmount - charge.
@@ -165,6 +167,8 @@ export interface PaymentSession {
   metadata?: Record<string, unknown>;
   /** Bank's own internal transaction reference (bank_confirmation type only) */
   bankRef?: string;
+  /** Free-text note about the payment, set at creation */
+  description?: string;
   /** True if session was created with a sandbox API key */
   isSandbox?: boolean;
 }
